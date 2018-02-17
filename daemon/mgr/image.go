@@ -2,7 +2,6 @@ package mgr
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -11,9 +10,12 @@ import (
 	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/ctrd"
 	"github.com/alibaba/pouch/daemon/config"
+	"github.com/alibaba/pouch/pkg/errtypes"
 	"github.com/alibaba/pouch/pkg/jsonstream"
+	"github.com/alibaba/pouch/pkg/reference"
 	"github.com/alibaba/pouch/registry"
 
+	"github.com/pkg/errors"
 	"github.com/tchap/go-patricia/patricia"
 )
 
@@ -32,7 +34,7 @@ type ImageMgr interface {
 	GetImage(ctx context.Context, idOrRef string) (*types.ImageInfo, error)
 
 	// RemoveImage deletes an image by reference.
-	RemoveImage(ctx context.Context, name string, option *ImageRemoveOption) error
+	RemoveImage(ctx context.Context, image *types.ImageInfo, option *ImageRemoveOption) error
 }
 
 // ImageManager is an implementation of interface ImageMgr.
@@ -43,7 +45,6 @@ type ImageManager struct {
 	// DefaultRegistry is the default registry of daemon.
 	// When users do not specify image repo in image name,
 	// daemon will automatically pull images from DefaultRegistry.
-	// TODO: make DefaultRegistry can be reloaded.
 	DefaultRegistry string
 
 	// client is a pointer to the containerd client.
@@ -56,8 +57,11 @@ type ImageManager struct {
 
 // NewImageManager initializes a brand new image manager.
 func NewImageManager(cfg *config.Config, client *ctrd.Client) (*ImageManager, error) {
+	if !strings.HasSuffix(cfg.DefaultRegistry, "/") {
+		cfg.DefaultRegistry += "/"
+	}
 	mgr := &ImageManager{
-		DefaultRegistry: "docker.io",
+		DefaultRegistry: cfg.DefaultRegistry,
 		client:          client,
 		cache:           newImageCache(),
 	}
@@ -82,6 +86,7 @@ func (mgr *ImageManager) PullImage(pctx context.Context, image, tag string, out 
 		close(wait)
 	}()
 
+	image = mgr.addRegistry(image)
 	img, err := mgr.client.PullImage(ctx, image+":"+tag, stream)
 
 	// wait goroutine to exit.
@@ -91,13 +96,7 @@ func (mgr *ImageManager) PullImage(pctx context.Context, image, tag string, out 
 		return err
 	}
 
-	// FIXME need to refactor it and the image's list interface.
-	mgr.cache.put(&types.ImageInfo{
-		Name:   img.Name(),
-		ID:     strings.TrimPrefix(string(img.Target().Digest), "sha256:")[:12],
-		Digest: string(img.Target().Digest),
-		Size:   img.Target().Size,
-	})
+	mgr.cache.put(&img)
 
 	return nil
 }
@@ -124,16 +123,12 @@ func (mgr *ImageManager) SearchImages(ctx context.Context, name string, registry
 
 // GetImage gets image by image id or ref.
 func (mgr *ImageManager) GetImage(ctx context.Context, idOrRef string) (*types.ImageInfo, error) {
+	idOrRef = mgr.addRegistry(idOrRef)
 	return mgr.cache.get(idOrRef)
 }
 
 // RemoveImage deletes an image by reference.
-func (mgr *ImageManager) RemoveImage(ctx context.Context, name string, option *ImageRemoveOption) error {
-	image, err := mgr.cache.get(name)
-	if err != nil {
-		return err
-	}
-
+func (mgr *ImageManager) RemoveImage(ctx context.Context, image *types.ImageInfo, option *ImageRemoveOption) error {
 	if err := mgr.client.RemoveImage(ctx, image.Name); err != nil {
 		return err
 	}
@@ -175,7 +170,7 @@ func (c *imageCache) put(image *types.ImageInfo) {
 	c.Lock()
 	defer c.Unlock()
 
-	id := strings.TrimPrefix(image.Digest, "sha256:")
+	id := strings.TrimPrefix(image.ID, "sha256:")
 	ref := image.Name
 
 	c.refs[ref] = image
@@ -186,11 +181,19 @@ func (c *imageCache) get(idOrRef string) (*types.ImageInfo, error) {
 	c.Lock()
 	defer c.Unlock()
 
-	image, ok := c.refs[idOrRef]
+	// use reference to parse idOrRef and add default tag if missing
+	ref, err := reference.ParseNamedReference(idOrRef)
+	if err != nil {
+		return nil, err
+	}
+	ref = reference.WithDefaultTagIfMissing(ref)
+
+	image, ok := c.refs[ref.String()]
 	if ok {
 		return image, nil
 	}
 
+	// use trie to fetch image if the idOrRef is the image ID
 	var images []*types.ImageInfo
 
 	fn := func(prefix patricia.Prefix, item patricia.Item) error {
@@ -205,8 +208,10 @@ func (c *imageCache) get(idOrRef string) (*types.ImageInfo, error) {
 		return nil, err
 	}
 
-	if len(images) != 1 {
-		return nil, fmt.Errorf("found %d images, not only one: %s", len(images), idOrRef)
+	if len(images) > 1 {
+		return nil, errors.Wrap(errtypes.ErrTooMany, "image: "+idOrRef)
+	} else if len(images) == 0 {
+		return nil, errors.Wrap(errtypes.ErrNotfound, "image: "+idOrRef)
 	}
 
 	return images[0], nil
@@ -216,7 +221,7 @@ func (c *imageCache) remove(image *types.ImageInfo) {
 	c.Lock()
 	defer c.Unlock()
 
-	id := strings.TrimPrefix(image.Digest, "sha256:")
+	id := strings.TrimPrefix(image.ID, "sha256:")
 	ref := image.Name
 
 	delete(c.refs, ref)

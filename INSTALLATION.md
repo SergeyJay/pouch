@@ -16,7 +16,58 @@ To be added.
 
 ### CentOS
 
-To be added.
+To install Pouch, you need a maintained version of CentOS 7 Archived versions aren’t supported or tested.
+
+We have put rpm package to Aliyun mirrors, you can install pouch using Pouch repository. If you install Pouch for the first on a new host machine, you need to set up the Pouch repository. Then, you can install and update Pouch from repository.
+
+**1.Install yum-utils**
+
+Install required packages. yum-utils provides the yum-config-manager utility.
+
+```bash
+sudo yum install -y yum-utils
+```
+
+**2. Set up the pouch repository**
+
+Use the following command to add Pouch repository.
+
+```bash
+sudo yum-config-manager \
+    --add-repo \
+    http://mirrors.aliyun.com/opsx/opsx-centos7.repo
+sudo yum update
+```
+
+**3. Install pouch**
+
+Run the following command to install the latest version of Pouch. If it's the first time to install Pouch on your host, you will be prompted to accept the GPG key, and the key's fingerprint will be shown. 
+
+```bash
+sudo yum install pouch 
+```
+
+After installing Pouch, the `pouch` group is created, but no users are added to the group.
+
+**4. Start pouch**
+
+```bash
+sudo systemctl start pouch
+```
+
+Afterwards, you can pull an image and run Pouch containers.
+
+**5. Uninstall pouch**
+
+```bash
+sudo yum remove pouch
+```
+
+After running the `remove` command, images, containers, volumes, or customized configuration files on your host are not automatically removed. To delete all images, containers and volumes, execute the following command:
+
+```bash
+sudo rm -rf /var/lib/pouch
+```
 
 ## Developer Quick-Start
 
@@ -55,7 +106,7 @@ $ mv /usr/local/bin/runc.amd64 /usr/local/bin/runc
 
 If you wish to experience hypervisor-based virtualization additionally, you will still need to install [runV](https://github.com/hyperhq/runv).
 
-More guide on experiencing Pouch with runV including runv Installation, please refer to [pouch run with runv guide](docs/pouch-runv-guide.md).
+More guide on experiencing Pouch with runV including runv Installation, please refer to [pouch run with runv guide](docs/pouch_with_runV.md).
 
 ### Pouch Build and Installation
 
@@ -94,7 +145,7 @@ INFO[0000] loading plugin "io.containerd.grpc.v1.containers"...  module=containe
 After pouchd's running, you could interact with pouchd by pouch cli:
 
 ```
-$ pouch images ls
+$ pouch images
 IMAGE ID             IMAGE NAME                                               SIZE
 3e8fa85ddfef         docker.io/library/busybox:latest                         2699
 504cf109b492         docker.io/library/redis:alpine                           2035

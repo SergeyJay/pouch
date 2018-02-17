@@ -9,20 +9,25 @@ import (
 	"github.com/alibaba/pouch/pkg/httputils"
 	"github.com/alibaba/pouch/pkg/randomid"
 
+	"github.com/go-openapi/strfmt"
 	"github.com/gorilla/mux"
 )
 
-func (s *Server) createVolume(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
-	var volumeCreateReq types.VolumeCreateRequest
-
-	if err := json.NewDecoder(req.Body).Decode(&volumeCreateReq); err != nil {
+func (s *Server) createVolume(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	config := &types.VolumeCreateConfig{}
+	// decode request body
+	if err := json.NewDecoder(req.Body).Decode(config); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+	// validate request body
+	if err := config.Validate(strfmt.NewFormats()); err != nil {
 		return httputils.NewHTTPError(err, http.StatusBadRequest)
 	}
 
-	name := volumeCreateReq.Name
-	driver := volumeCreateReq.Driver
-	options := volumeCreateReq.DriverOpts
-	labels := volumeCreateReq.Labels
+	name := config.Name
+	driver := config.Driver
+	options := config.DriverOpts
+	labels := config.Labels
 
 	if name == "" {
 		name = randomid.Generate()
@@ -39,18 +44,49 @@ func (s *Server) createVolume(ctx context.Context, resp http.ResponseWriter, req
 	volume := types.VolumeInfo{
 		Name:   name,
 		Driver: driver,
-		Labels: volumeCreateReq.Labels,
+		Labels: config.Labels,
 	}
-	resp.WriteHeader(http.StatusCreated)
-	return json.NewEncoder(resp).Encode(volume)
+	return EncodeResponse(rw, http.StatusCreated, volume)
 }
 
-func (s *Server) removeVolume(ctx context.Context, resp http.ResponseWriter, req *http.Request) (err error) {
+func (s *Server) getVolume(ctx context.Context, rw http.ResponseWriter, req *http.Request) (err error) {
+	name := mux.Vars(req)["name"]
+	volume, err := s.VolumeMgr.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	respVolume := types.VolumeInfo{
+		Name:       volume.Name,
+		Driver:     volume.Driver(),
+		Mountpoint: volume.Path(),
+		CreatedAt:  volume.CreationTimestamp.Format("2006-1-2 15:04:05"),
+		Labels:     volume.Labels,
+		Status: map[string]interface{}{
+			"size": volume.Size(),
+		},
+	}
+	return EncodeResponse(rw, http.StatusOK, respVolume)
+}
+
+func (s *Server) removeVolume(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	name := mux.Vars(req)["name"]
 
 	if err := s.VolumeMgr.Remove(ctx, name); err != nil {
 		return err
 	}
-	resp.WriteHeader(http.StatusOK)
+	rw.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+func (s *Server) listVolume(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	volumes, err := s.VolumeMgr.List(ctx, map[string]string{})
+	if err != nil {
+		return err
+	}
+
+	respVolumes := types.VolumeListResp{Volumes: []*types.VolumeInfo{}, Warnings: nil}
+	for _, name := range volumes {
+		respVolumes.Volumes = append(respVolumes.Volumes, &types.VolumeInfo{Name: name})
+	}
+	return EncodeResponse(rw, http.StatusOK, respVolumes)
 }

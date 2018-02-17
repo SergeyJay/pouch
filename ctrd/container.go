@@ -2,25 +2,34 @@ package ctrd
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"syscall"
 	"time"
 
 	"github.com/alibaba/pouch/daemon/containerio"
+	"github.com/alibaba/pouch/pkg/errtypes"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/linux/runctypes"
 	"github.com/containerd/containerd/oci"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
+var (
+	runtimeRoot = "/run"
+)
+
 type containerPack struct {
-	id        string
-	ch        chan *Message
-	sch       <-chan containerd.ExitStatus
-	container containerd.Container
-	task      containerd.Task
+	id            string
+	ch            chan *Message
+	sch           <-chan containerd.ExitStatus
+	container     containerd.Container
+	task          containerd.Task
+	skipStopHooks bool
 }
 
 // ExecContainer executes a process in container.
@@ -51,19 +60,18 @@ func (c *Client) ExecContainer(ctx context.Context, process *Process) error {
 		return errors.Wrap(err, "failed to exec process")
 	}
 	fail := make(chan error, 1)
+	defer close(fail)
+
 	go func() {
-		var msg *Message
-		select {
-		case status := <-exitStatus:
-			msg = &Message{
-				err:      status.Error(),
-				exitCode: status.ExitCode(),
-				exitTime: status.ExitTime(),
-			}
-		case err := <-fail:
-			msg = &Message{
-				startErr: err,
-			}
+		status := <-exitStatus
+		msg := &Message{
+			err:      status.Error(),
+			exitCode: status.ExitCode(),
+			exitTime: status.ExitTime(),
+		}
+
+		if err := <-fail; err != nil {
+			msg.err = err
 		}
 
 		for _, hook := range c.hooks {
@@ -127,7 +135,7 @@ func (c *Client) ProbeContainer(ctx context.Context, id string, timeout time.Dur
 		ch <- msg // put it back, make sure the method can be called repeatedly.
 		return msg
 	case <-time.After(timeout):
-		return &Message{err: ErrTimeout}
+		return &Message{err: errtypes.ErrTimeout}
 	case <-ctx.Done():
 		return &Message{err: ctx.Err()}
 	}
@@ -136,14 +144,14 @@ func (c *Client) ProbeContainer(ctx context.Context, id string, timeout time.Dur
 // RecoverContainer reload the container from metadata and watch it, if program be restarted.
 func (c *Client) RecoverContainer(ctx context.Context, id string, io *containerio.IO) error {
 	if !c.lock.Trylock(id) {
-		return ErrTrylockFailed
+		return errtypes.ErrLockfailed
 	}
 	defer c.lock.Unlock(id)
 
 	lc, err := c.client.LoadContainer(ctx, id)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
-			return ErrContainerNotfound
+			return errors.Wrap(errtypes.ErrNotfound, "container")
 		}
 		return errors.Wrap(err, "failed to load container")
 	}
@@ -154,15 +162,15 @@ func (c *Client) RecoverContainer(ctx context.Context, id string, io *containeri
 			return errors.Wrap(err, "failed to get task")
 		}
 		// not found task, delete container directly.
-		lc.Delete(ctx, containerd.WithSnapshotCleanup)
-		return ErrTaskNotfound
+		lc.Delete(ctx)
+		return errors.Wrap(errtypes.ErrNotfound, "task")
 	}
 
 	statusCh, err := task.Wait(ctx)
 	if err != nil {
 		return errors.Wrap(err, "failed to wait task")
 	}
-	c.watch.add(containerPack{
+	c.watch.add(&containerPack{
 		id:        id,
 		container: lc,
 		task:      task,
@@ -175,9 +183,9 @@ func (c *Client) RecoverContainer(ctx context.Context, id string, io *containeri
 }
 
 // DestroyContainer kill container and delete it.
-func (c *Client) DestroyContainer(ctx context.Context, id string) (*Message, error) {
+func (c *Client) DestroyContainer(ctx context.Context, id string, timeout int64) (*Message, error) {
 	if !c.lock.Trylock(id) {
-		return nil, ErrTrylockFailed
+		return nil, errtypes.ErrLockfailed
 	}
 	defer c.lock.Unlock(id)
 
@@ -186,8 +194,15 @@ func (c *Client) DestroyContainer(ctx context.Context, id string) (*Message, err
 		return nil, err
 	}
 
+	// if you call DestroyContainer to stop a container, will skip the hooks.
+	// the caller need to execute the all hooks.
+	pack.skipStopHooks = true
+	defer func() {
+		pack.skipStopHooks = false
+	}()
+
 	waitExit := func() *Message {
-		return c.ProbeContainer(ctx, id, time.Second*5)
+		return c.ProbeContainer(ctx, id, time.Duration(timeout)*time.Second)
 	}
 
 	var msg *Message
@@ -196,31 +211,27 @@ func (c *Client) DestroyContainer(ctx context.Context, id string) (*Message, err
 		if !errdefs.IsNotFound(err) {
 			return nil, errors.Wrap(err, "failed to kill task")
 		}
-	} else {
-		// wait for the task to exit.
+		goto clean
+	}
+	// wait for the task to exit.
+	msg = waitExit()
+
+	if err := msg.RawError(); err != nil && errtypes.IsTimeout(err) {
+		// timeout, use SIGKILL to retry.
+		if err := pack.task.Kill(ctx, syscall.SIGKILL, containerd.WithKillAll); err != nil {
+			if !errdefs.IsNotFound(err) {
+				return nil, errors.Wrap(err, "failed to kill task")
+			}
+			goto clean
+		}
 		msg = waitExit()
 	}
-
-	if msg.Error() != nil {
-		if cerr, ok := msg.Error().(Error); ok && cerr.IsTimeout() {
-			// timeout, use SIGKILL to retry.
-			if err := pack.task.Kill(ctx, syscall.SIGKILL, containerd.WithKillAll); err != nil {
-				if !errdefs.IsNotFound(err) {
-					return nil, errors.Wrap(err, "failed to kill task")
-				}
-
-			} else {
-				msg = waitExit()
-			}
-		}
-	}
-	if msg.Error() != nil {
-		if cerr, ok := msg.Error().(Error); ok && cerr.IsTimeout() {
-			return nil, cerr
-		}
+	if err := msg.RawError(); err != nil && errtypes.IsTimeout(err) {
+		return nil, err
 	}
 
-	if err := pack.container.Delete(ctx, containerd.WithSnapshotCleanup); err != nil {
+clean:
+	if err := pack.container.Delete(ctx); err != nil {
 		if !errdefs.IsNotFound(err) {
 			return msg, errors.Wrap(err, "failed to delete container")
 		}
@@ -231,15 +242,61 @@ func (c *Client) DestroyContainer(ctx context.Context, id string) (*Message, err
 	return msg, c.watch.remove(ctx, id)
 }
 
+// PauseContainer pause container.
+func (c *Client) PauseContainer(ctx context.Context, id string) error {
+	if !c.lock.Trylock(id) {
+		return errtypes.ErrLockfailed
+	}
+	defer c.lock.Unlock(id)
+
+	pack, err := c.watch.get(id)
+	if err != nil {
+		return err
+	}
+
+	if err := pack.task.Pause(ctx); err != nil {
+		if !errdefs.IsNotFound(err) {
+			return errors.Wrap(err, "failed to pause task")
+		}
+	}
+
+	logrus.Infof("success to pause container: %s", id)
+
+	return nil
+}
+
+// UnpauseContainer unpauses a container.
+func (c *Client) UnpauseContainer(ctx context.Context, id string) error {
+	if !c.lock.Trylock(id) {
+		return errtypes.ErrLockfailed
+	}
+	defer c.lock.Unlock(id)
+
+	pack, err := c.watch.get(id)
+	if err != nil {
+		return err
+	}
+
+	if err := pack.task.Resume(ctx); err != nil {
+		if !errdefs.IsNotFound(err) {
+			return errors.Wrap(err, "failed to resume task")
+		}
+	}
+
+	logrus.Infof("success to unpause container: %s", id)
+
+	return nil
+}
+
 // CreateContainer create container and start process.
 func (c *Client) CreateContainer(ctx context.Context, container *Container) error {
 	var (
-		ref = container.Info.Config.Image
-		id  = container.Info.ID
+		ref = container.Image
+		id  = container.ID
 	)
 
 	if !c.lock.Trylock(id) {
-		return ErrTrylockFailed
+		return errtypes.ErrLockfailed
 	}
 	defer c.lock.Unlock(id)
 
@@ -251,7 +308,7 @@ func (c *Client) createContainer(ctx context.Context, ref, id string, container 
 	img, err := c.client.GetImage(ctx, ref)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
-			return ErrImageNotfound
+			return errors.Wrap(errtypes.ErrNotfound, "image")
 		}
 		return errors.Wrapf(err, "failed to get image: %s", ref)
 	}
@@ -260,17 +317,26 @@ func (c *Client) createContainer(ctx context.Context, ref, id string, container 
 
 	// create container
 	specOptions := []oci.SpecOpts{
-		oci.WithImageConfig(img),
+		// oci.WithImageConfig(img),
 		oci.WithRootFSPath("rootfs"),
 	}
-	if args := container.Spec.Process.Args; len(args) != 0 {
-		specOptions = append(specOptions, oci.WithProcessArgs(args...))
-	}
+	// if args := container.Spec.Process.Args; len(args) != 0 {
+	// 	specOptions = append(specOptions, oci.WithProcessArgs(args...))
+	// }
 
 	options := []containerd.NewContainerOpts{
-		containerd.WithNewSnapshot(id, img),
 		containerd.WithSpec(container.Spec, specOptions...),
+		containerd.WithRuntime(fmt.Sprintf("io.containerd.runtime.v1.%s", runtime.GOOS), &runctypes.RuncOptions{
+			Runtime:     container.Runtime,
+			RuntimeRoot: runtimeRoot,
+		}),
 	}
+
+	// check snapshot exist or not.
+	if _, err := c.GetSnapshot(ctx, id); err != nil {
+		return errors.Wrapf(err, "failed to create container, id: %s", id)
+	}
+	options = append(options, containerd.WithSnapshot(id))
 
 	nc, err := c.client.NewContainer(ctx, id, options...)
 	if err != nil {
@@ -296,8 +362,8 @@ func (c *Client) createContainer(ctx context.Context, ref, id string, container 
 	return nil
 }
 
-func (c *Client) createTask(ctx context.Context, id string, container containerd.Container, cc *Container) (p containerPack, err0 error) {
-	var pack containerPack
+func (c *Client) createTask(ctx context.Context, id string, container containerd.Container, cc *Container) (p *containerPack, err0 error) {
+	var pack *containerPack
 
 	var io cio.Creation
 	if cc.Spec.Process.Terminal {
@@ -332,7 +398,7 @@ func (c *Client) createTask(ctx context.Context, id string, container containerd
 
 	logrus.Infof("success to start task, container id: %s", id)
 
-	pack = containerPack{
+	pack = &containerPack{
 		id:        id,
 		container: container,
 		task:      task,

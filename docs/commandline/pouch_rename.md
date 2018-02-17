@@ -7,19 +7,19 @@ Rename a container with newName
 Rename a container object in Pouchd. You can change the name of one container identified by its name or ID. The container you renamed is ready to be used by its new name.
 
 ```
-pouch rename [container] [newName] [flags]
+pouch rename CONTAINER NEWNAME
 ```
 
 ### Examples
 
 ```
 $ pouch ps
-Name     ID       Status    Image
-foo      71b9c1   Running   docker.io/library/busybox:latest
+Name     ID       Status    Image                              Runtime
+foo      71b9c1   Running   docker.io/library/busybox:latest   runc
 $ pouch rename foo newName
 $ pouch ps
-Name     ID       Status    Image
-newName  71b9c1   Running   docker.io/library/busybox:latest
+Name     ID       Status    Image                              Runtime
+newName  71b9c1   Running   docker.io/library/busybox:latest   runc
 
 ```
 

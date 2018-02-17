@@ -75,19 +75,19 @@ func NewClient(cfg Config) (*Client, error) {
 			ids: make(map[string]struct{}),
 		},
 		watch: &watch{
-			containers: make(map[string]containerPack),
+			containers: make(map[string]*containerPack),
 			client:     cli,
 		},
 	}, nil
 }
 
-// SetStopHooks specified the handlers of container exit.
-func (c *Client) SetStopHooks(hooks ...func(string, *Message) error) {
+// SetExitHooks specified the handlers of container exit.
+func (c *Client) SetExitHooks(hooks ...func(string, *Message) error) {
 	c.watch.hooks = hooks
 }
 
-// SetExitHooks specified the handlers of exec process exit.
-func (c *Client) SetExitHooks(hooks ...func(string, *Message) error) {
+// SetExecExitHooks specified the handlers of exec process exit.
+func (c *Client) SetExecExitHooks(hooks ...func(string, *Message) error) {
 	c.hooks = hooks
 }
 

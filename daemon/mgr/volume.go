@@ -7,8 +7,11 @@ import (
 	"strings"
 
 	"github.com/alibaba/pouch/daemon/meta"
+	"github.com/alibaba/pouch/pkg/errtypes"
 	"github.com/alibaba/pouch/volume"
 	"github.com/alibaba/pouch/volume/types"
+
+	"github.com/pkg/errors"
 )
 
 // VolumeMgr defines interface to manage container volume.
@@ -22,8 +25,8 @@ type VolumeMgr interface {
 	// List returns all volumes on this host.
 	List(ctx context.Context, labels map[string]string) ([]string, error)
 
-	// Info returns the information of volume that specified name/id.
-	Info(ctx context.Context, name string) (*types.Volume, error)
+	// Get returns the information of volume that specified name/id.
+	Get(ctx context.Context, name string) (*types.Volume, error)
 
 	// Path returns the mount path of volume.
 	Path(ctx context.Context, name string) (string, error)
@@ -92,7 +95,12 @@ func (vm *VolumeManager) Remove(ctx context.Context, name string) error {
 	id := types.VolumeID{
 		Name: name,
 	}
-	return vm.core.RemoveVolume(id)
+	if err := vm.core.RemoveVolume(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return errors.Wrap(errtypes.ErrNotfound, err.Error())
+		}
+	}
+	return nil
 }
 
 // List returns all volumes on this host.
@@ -109,12 +117,19 @@ func (vm *VolumeManager) List(ctx context.Context, labels map[string]string) ([]
 	return vm.core.ListVolumeName(labels)
 }
 
-// Info returns the information of volume that specified name/id.
-func (vm *VolumeManager) Info(ctx context.Context, name string) (*types.Volume, error) {
+// Get returns the information of volume that specified name/id.
+func (vm *VolumeManager) Get(ctx context.Context, name string) (*types.Volume, error) {
 	id := types.VolumeID{
 		Name: name,
 	}
-	return vm.core.GetVolume(id)
+	vol, err := vm.core.GetVolume(id)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, errors.Wrap(errtypes.ErrNotfound, err.Error())
+		}
+		return nil, err
+	}
+	return vol, nil
 }
 
 // Path returns the mount path of volume.

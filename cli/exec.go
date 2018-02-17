@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/alibaba/pouch/apis/types"
@@ -28,7 +28,7 @@ type ExecCommand struct {
 func (e *ExecCommand) Init(c *Cli) {
 	e.cli = c
 	e.cmd = &cobra.Command{
-		Use:   "exec [container]",
+		Use:   "exec [OPTIONS] CONTAINER COMMAND [ARG...]",
 		Short: "Exec a process in a running container",
 		Long:  execDescription,
 		Args:  cobra.MinimumNArgs(2),
@@ -43,6 +43,7 @@ func (e *ExecCommand) Init(c *Cli) {
 // addFlags adds flags for specific command.
 func (e *ExecCommand) addFlags() {
 	flagSet := e.cmd.Flags()
+	flagSet.SetInterspersed(false)
 	flagSet.BoolVarP(&e.Detach, "detach", "d", false, "Run the process in the background")
 	flagSet.BoolVarP(&e.Terminal, "tty", "t", false, "Allocate a tty device")
 	flagSet.BoolVarP(&e.Interactive, "interactive", "i", false, "Open container's STDIN")
@@ -50,15 +51,16 @@ func (e *ExecCommand) addFlags() {
 
 // runExec is the entry of ExecCommand command.
 func (e *ExecCommand) runExec(args []string) error {
+	ctx := context.Background()
 	apiClient := e.cli.Client()
 
 	// create exec process.
 	id := args[0]
-	command := args[1]
+	command := args[1:]
 
 	createExecConfig := &types.ExecCreateConfig{
-		Cmd:          strings.Fields(command),
-		Tty:          e.Terminal,
+		Cmd:          command,
+		Tty:          e.Terminal || e.Interactive,
 		Detach:       e.Detach,
 		AttachStderr: !e.Detach,
 		AttachStdout: !e.Detach,
@@ -67,7 +69,7 @@ func (e *ExecCommand) runExec(args []string) error {
 		User:         "",
 	}
 
-	createResp, err := apiClient.ContainerCreateExec(id, createExecConfig)
+	createResp, err := apiClient.ContainerCreateExec(ctx, id, createExecConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create exec: %v", err)
 	}
@@ -78,7 +80,7 @@ func (e *ExecCommand) runExec(args []string) error {
 		Tty:    e.Terminal && e.Interactive,
 	}
 
-	conn, reader, err := apiClient.ContainerStartExec(createResp.ID, startExecConfig)
+	conn, reader, err := apiClient.ContainerStartExec(ctx, createResp.ID, startExecConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create exec: %v", err)
 	}

@@ -59,6 +59,9 @@ type HostConfig struct {
 	// A list of DNS search domains.
 	DNSSearch []string `json:"DnsSearch"`
 
+	// Whether to enable lxcfs.
+	EnableLxcfs bool `json:"EnableLxcfs,omitempty"`
+
 	// A list of hostnames/IP mappings to add to the container's `/etc/hosts` file. Specified in the form `["hostname:IP"]`.
 	//
 	ExtraHosts []string `json:"ExtraHosts"`
@@ -67,13 +70,11 @@ type HostConfig struct {
 	GroupAdd []string `json:"GroupAdd"`
 
 	// IPC sharing mode for the container. Possible values are:
-	//
 	// - `"none"`: own private IPC namespace, with /dev/shm not mounted
 	// - `"private"`: own private IPC namespace
 	// - `"shareable"`: own private IPC namespace, with a possibility to share it with other containers
 	// - `"container:<name|id>"`: join another (shareable) container's IPC namespace
 	// - `"host"`: use the host system's IPC namespace
-	//
 	// If not specified, daemon default is used, which can either be `"private"`
 	// or `"shareable"`, depending on daemon version and configuration.
 	//
@@ -95,14 +96,13 @@ type HostConfig struct {
 	OomScoreAdj int64 `json:"OomScoreAdj,omitempty"`
 
 	// Set the PID (Process) Namespace mode for the container. It can be either:
-	//
 	// - `"container:<name|id>"`: joins another container's PID namespace
 	// - `"host"`: use the host's PID namespace inside the container
 	//
 	PidMode string `json:"PidMode,omitempty"`
 
 	// A map of exposed container ports and the host port they should map to.
-	PortBindings map[string]HostConfigPortBindingsAnon `json:"PortBindings,omitempty"`
+	PortBindings map[string]PortBinding `json:"PortBindings,omitempty"`
 
 	// Gives the container full access to the host.
 	Privileged bool `json:"Privileged,omitempty"`
@@ -112,6 +112,9 @@ type HostConfig struct {
 
 	// Mount the container's root filesystem as read only.
 	ReadonlyRootfs bool `json:"ReadonlyRootfs,omitempty"`
+
+	// Restart policy to be used to manage the container
+	RestartPolicy *RestartPolicy `json:"RestartPolicy,omitempty"`
 
 	// Runtime to use with this container.
 	Runtime string `json:"Runtime,omitempty"`
@@ -146,6 +149,8 @@ type HostConfig struct {
 
 	// A list of volumes to inherit from another container, specified in the form `<container name>[:<ro|rw>]`.
 	VolumesFrom []string `json:"VolumesFrom"`
+
+	Resources
 }
 
 // UnmarshalJSON unmarshals this object from a JSON structure
@@ -172,6 +177,8 @@ func (m *HostConfig) UnmarshalJSON(raw []byte) error {
 
 		DNSSearch []string `json:"DnsSearch,omitempty"`
 
+		EnableLxcfs bool `json:"EnableLxcfs,omitempty"`
+
 		ExtraHosts []string `json:"ExtraHosts,omitempty"`
 
 		GroupAdd []string `json:"GroupAdd,omitempty"`
@@ -190,13 +197,15 @@ func (m *HostConfig) UnmarshalJSON(raw []byte) error {
 
 		PidMode string `json:"PidMode,omitempty"`
 
-		PortBindings map[string]HostConfigPortBindingsAnon `json:"PortBindings,omitempty"`
+		PortBindings map[string]PortBinding `json:"PortBindings,omitempty"`
 
 		Privileged bool `json:"Privileged,omitempty"`
 
 		PublishAllPorts bool `json:"PublishAllPorts,omitempty"`
 
 		ReadonlyRootfs bool `json:"ReadonlyRootfs,omitempty"`
+
+		RestartPolicy *RestartPolicy `json:"RestartPolicy,omitempty"`
 
 		Runtime string `json:"Runtime,omitempty"`
 
@@ -242,6 +251,8 @@ func (m *HostConfig) UnmarshalJSON(raw []byte) error {
 
 	m.DNSSearch = data.DNSSearch
 
+	m.EnableLxcfs = data.EnableLxcfs
+
 	m.ExtraHosts = data.ExtraHosts
 
 	m.GroupAdd = data.GroupAdd
@@ -268,6 +279,8 @@ func (m *HostConfig) UnmarshalJSON(raw []byte) error {
 
 	m.ReadonlyRootfs = data.ReadonlyRootfs
 
+	m.RestartPolicy = data.RestartPolicy
+
 	m.Runtime = data.Runtime
 
 	m.SecurityOpt = data.SecurityOpt
@@ -287,6 +300,12 @@ func (m *HostConfig) UnmarshalJSON(raw []byte) error {
 	m.VolumeDriver = data.VolumeDriver
 
 	m.VolumesFrom = data.VolumesFrom
+
+	var aO1 Resources
+	if err := swag.ReadJSON(raw, &aO1); err != nil {
+		return err
+	}
+	m.Resources = aO1
 
 	return nil
 }
@@ -316,6 +335,8 @@ func (m HostConfig) MarshalJSON() ([]byte, error) {
 
 		DNSSearch []string `json:"DnsSearch,omitempty"`
 
+		EnableLxcfs bool `json:"EnableLxcfs,omitempty"`
+
 		ExtraHosts []string `json:"ExtraHosts,omitempty"`
 
 		GroupAdd []string `json:"GroupAdd,omitempty"`
@@ -334,13 +355,15 @@ func (m HostConfig) MarshalJSON() ([]byte, error) {
 
 		PidMode string `json:"PidMode,omitempty"`
 
-		PortBindings map[string]HostConfigPortBindingsAnon `json:"PortBindings,omitempty"`
+		PortBindings map[string]PortBinding `json:"PortBindings,omitempty"`
 
 		Privileged bool `json:"Privileged,omitempty"`
 
 		PublishAllPorts bool `json:"PublishAllPorts,omitempty"`
 
 		ReadonlyRootfs bool `json:"ReadonlyRootfs,omitempty"`
+
+		RestartPolicy *RestartPolicy `json:"RestartPolicy,omitempty"`
 
 		Runtime string `json:"Runtime,omitempty"`
 
@@ -383,6 +406,8 @@ func (m HostConfig) MarshalJSON() ([]byte, error) {
 
 	data.DNSSearch = m.DNSSearch
 
+	data.EnableLxcfs = m.EnableLxcfs
+
 	data.ExtraHosts = m.ExtraHosts
 
 	data.GroupAdd = m.GroupAdd
@@ -409,6 +434,8 @@ func (m HostConfig) MarshalJSON() ([]byte, error) {
 
 	data.ReadonlyRootfs = m.ReadonlyRootfs
 
+	data.RestartPolicy = m.RestartPolicy
+
 	data.Runtime = m.Runtime
 
 	data.SecurityOpt = m.SecurityOpt
@@ -434,6 +461,12 @@ func (m HostConfig) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	_parts = append(_parts, jsonData)
+
+	aO1, err := swag.WriteJSON(m.Resources)
+	if err != nil {
+		return nil, err
+	}
+	_parts = append(_parts, aO1)
 
 	return swag.ConcatJSON(_parts...), nil
 }
@@ -494,6 +527,10 @@ func (m *HostConfig) Validate(formats strfmt.Registry) error {
 		res = append(res, err)
 	}
 
+	if err := m.validateRestartPolicy(formats); err != nil {
+		res = append(res, err)
+	}
+
 	if err := m.validateSecurityOpt(formats); err != nil {
 		res = append(res, err)
 	}
@@ -503,6 +540,10 @@ func (m *HostConfig) Validate(formats strfmt.Registry) error {
 	}
 
 	if err := m.validateVolumesFrom(formats); err != nil {
+		res = append(res, err)
+	}
+
+	if err := m.Resources.Validate(formats); err != nil {
 		res = append(res, err)
 	}
 
@@ -683,8 +724,27 @@ func (m *HostConfig) validatePortBindings(formats strfmt.Registry) error {
 		return nil
 	}
 
-	if swag.IsZero(m.PortBindings) { // not required
+	if err := validate.Required("PortBindings", "body", m.PortBindings); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *HostConfig) validateRestartPolicy(formats strfmt.Registry) error {
+
+	if swag.IsZero(m.RestartPolicy) { // not required
 		return nil
+	}
+
+	if m.RestartPolicy != nil {
+
+		if err := m.RestartPolicy.Validate(formats); err != nil {
+			if ve, ok := err.(*errors.Validation); ok {
+				return ve.ValidateName("RestartPolicy")
+			}
+			return err
+		}
 	}
 
 	return nil
@@ -836,50 +896,6 @@ func (m *HostConfigAO0LogConfig) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary interface implementation
 func (m *HostConfigAO0LogConfig) UnmarshalBinary(b []byte) error {
 	var res HostConfigAO0LogConfig
-	if err := swag.ReadJSON(b, &res); err != nil {
-		return err
-	}
-	*m = res
-	return nil
-}
-
-// HostConfigPortBindingsAnon host config port bindings anon
-// swagger:model HostConfigPortBindingsAnon
-
-type HostConfigPortBindingsAnon struct {
-
-	// The host IP address
-	HostIP string `json:"HostIp,omitempty"`
-
-	// The host port number, as a string
-	HostPort string `json:"HostPort,omitempty"`
-}
-
-/* polymorph HostConfigPortBindingsAnon HostIp false */
-
-/* polymorph HostConfigPortBindingsAnon HostPort false */
-
-// Validate validates this host config port bindings anon
-func (m *HostConfigPortBindingsAnon) Validate(formats strfmt.Registry) error {
-	var res []error
-
-	if len(res) > 0 {
-		return errors.CompositeValidationError(res...)
-	}
-	return nil
-}
-
-// MarshalBinary interface implementation
-func (m *HostConfigPortBindingsAnon) MarshalBinary() ([]byte, error) {
-	if m == nil {
-		return nil, nil
-	}
-	return swag.WriteJSON(m)
-}
-
-// UnmarshalBinary interface implementation
-func (m *HostConfigPortBindingsAnon) UnmarshalBinary(b []byte) error {
-	var res HostConfigPortBindingsAnon
 	if err := swag.ReadJSON(b, &res); err != nil {
 		return err
 	}

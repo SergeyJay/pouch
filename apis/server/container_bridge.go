@@ -12,11 +12,13 @@ import (
 	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/daemon/mgr"
 	"github.com/alibaba/pouch/pkg/httputils"
+	"github.com/alibaba/pouch/pkg/utils"
 
+	"github.com/go-openapi/strfmt"
 	"github.com/gorilla/mux"
 )
 
-func (s *Server) removeContainers(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
+func (s *Server) removeContainers(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	name := mux.Vars(req)["name"]
 
 	option := &mgr.ContainerRemoveOption{
@@ -30,11 +32,11 @@ func (s *Server) removeContainers(ctx context.Context, resp http.ResponseWriter,
 		return err
 	}
 
-	resp.WriteHeader(http.StatusNoContent)
+	rw.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
-func (s *Server) renameContainer(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
+func (s *Server) renameContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	oldName := mux.Vars(req)["id"]
 	newName := req.FormValue("name")
 
@@ -42,47 +44,53 @@ func (s *Server) renameContainer(ctx context.Context, resp http.ResponseWriter, 
 		return err
 	}
 
-	resp.WriteHeader(http.StatusNoContent)
+	rw.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
-func (s *Server) createContainerExec(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
-	name := mux.Vars(req)["name"]
-
+func (s *Server) createContainerExec(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	config := &types.ExecCreateConfig{}
-
+	// decode request body
 	if err := json.NewDecoder(req.Body).Decode(config); err != nil {
-		return err
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+	// validate request body
+	if err := config.Validate(strfmt.NewFormats()); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
 	}
 
-	if len(config.Cmd) == 0 {
-		return fmt.Errorf("no exec process specified")
-	}
+	name := mux.Vars(req)["name"]
 
 	id, err := s.ContainerMgr.CreateExec(ctx, name, config)
 	if err != nil {
 		return err
 	}
 
-	resp.WriteHeader(http.StatusCreated)
-	return json.NewEncoder(resp).Encode(&types.ExecCreateResponse{
+	execCreateResp := &types.ExecCreateResp{
 		ID: id,
-	})
+	}
+
+	return EncodeResponse(rw, http.StatusCreated, execCreateResp)
 }
 
-func (s *Server) startContainerExec(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
-	name := mux.Vars(req)["name"]
-
+func (s *Server) startContainerExec(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	config := &types.ExecStartConfig{}
-
+	// decode request body
 	if err := json.NewDecoder(req.Body).Decode(config); err != nil {
-		return err
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
 	}
+	// validate request body
+	if err := config.Validate(strfmt.NewFormats()); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+
+	name := mux.Vars(req)["name"]
+	_, upgrade := req.Header["Upgrade"]
 
 	var attach *mgr.AttachConfig
 
 	if !config.Detach {
-		hijacker, ok := resp.(http.Hijacker)
+		hijacker, ok := rw.(http.Hijacker)
 		if !ok {
 			return fmt.Errorf("not a hijack connection, container: %s", name)
 		}
@@ -92,32 +100,43 @@ func (s *Server) startContainerExec(ctx context.Context, resp http.ResponseWrite
 			Stdin:   config.Tty,
 			Stdout:  true,
 			Stderr:  true,
-			Upgrade: true,
+			Upgrade: upgrade,
 		}
 	}
 
 	return s.ContainerMgr.StartExec(ctx, name, config, attach)
 }
 
-func (s *Server) createContainer(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
-	var config types.ContainerConfigWrapper
-
-	if err := json.NewDecoder(req.Body).Decode(&config); err != nil {
+func (s *Server) createContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	config := &types.ContainerCreateConfig{}
+	// decode request body
+	if err := json.NewDecoder(req.Body).Decode(config); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+	// validate request body
+	if err := config.Validate(strfmt.NewFormats()); err != nil {
 		return httputils.NewHTTPError(err, http.StatusBadRequest)
 	}
 
 	name := req.FormValue("name")
 
-	ret, err := s.ContainerMgr.Create(ctx, name, &config)
+	// to do compensation to potential nil pointer after validation
+	if config.HostConfig == nil {
+		config.HostConfig = &types.HostConfig{}
+	}
+	if config.NetworkingConfig == nil {
+		config.NetworkingConfig = &types.NetworkingConfig{}
+	}
+
+	container, err := s.ContainerMgr.Create(ctx, name, config)
 	if err != nil {
 		return err
 	}
 
-	resp.WriteHeader(http.StatusCreated)
-	return json.NewEncoder(resp).Encode(ret)
+	return EncodeResponse(rw, http.StatusCreated, container)
 }
 
-func (s *Server) startContainer(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
+func (s *Server) startContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	id := mux.Vars(req)["name"]
 
 	detachKeys := req.FormValue("detachKeys")
@@ -126,11 +145,11 @@ func (s *Server) startContainer(ctx context.Context, resp http.ResponseWriter, r
 		return err
 	}
 
-	resp.WriteHeader(http.StatusOK)
+	rw.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
-func (s *Server) stopContainer(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
+func (s *Server) stopContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	var (
 		t   int
 		err error
@@ -144,20 +163,42 @@ func (s *Server) stopContainer(ctx context.Context, resp http.ResponseWriter, re
 
 	name := mux.Vars(req)["name"]
 
-	if err = s.ContainerMgr.Stop(ctx, name, time.Duration(t)*time.Second); err != nil {
+	if err = s.ContainerMgr.Stop(ctx, name, int64(t)); err != nil {
 		return err
 	}
 
-	resp.WriteHeader(http.StatusOK)
+	rw.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
-func (s *Server) attachContainer(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
+func (s *Server) pauseContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	name := mux.Vars(req)["name"]
+
+	if err := s.ContainerMgr.Pause(ctx, name); err != nil {
+		return err
+	}
+
+	rw.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) unpauseContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	name := mux.Vars(req)["name"]
+
+	if err := s.ContainerMgr.Unpause(ctx, name); err != nil {
+		return err
+	}
+
+	rw.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) attachContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	name := mux.Vars(req)["name"]
 
 	_, upgrade := req.Header["Upgrade"]
 
-	hijacker, ok := resp.(http.Hijacker)
+	hijacker, ok := rw.(http.Hijacker)
 	if !ok {
 		return fmt.Errorf("not a hijack connection, container: %s", name)
 	}
@@ -177,44 +218,62 @@ func (s *Server) attachContainer(ctx context.Context, resp http.ResponseWriter, 
 	return nil
 }
 
-func (s *Server) getContainers(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
-	cis, err := s.ContainerMgr.List(ctx)
+func (s *Server) getContainers(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	option := &mgr.ContainerListOption{
+		All: httputils.BoolValue(req, "all"),
+	}
+
+	metas, err := s.ContainerMgr.List(ctx, func(meta *mgr.ContainerMeta) bool {
+		return true
+	}, option)
 	if err != nil {
 		return err
 	}
 
-	cs := make([]types.Container, 0, len(cis))
-	for _, ci := range cis {
-		c := types.Container{
-			ID:      ci.ID,
-			Names:   []string{ci.Name},
-			Status:  string(ci.Status),
-			Image:   ci.Config.Image,
-			Command: strings.Join(ci.Config.Cmd, " "),
-			Created: ci.StartedAt,
-			Labels:  ci.Config.Labels,
-		}
-		cs = append(cs, c)
-	}
+	containerList := make([]types.Container, 0, len(metas))
 
-	resp.WriteHeader(http.StatusOK)
-	return json.NewEncoder(resp).Encode(cs)
+	for _, m := range metas {
+		status, err := m.FormatStatus()
+		if err != nil {
+			return err
+		}
+
+		t, err := time.Parse(utils.TimeLayout, m.Created)
+		if err != nil {
+			return err
+		}
+
+		container := types.Container{
+			ID:         m.ID,
+			Names:      []string{m.Name},
+			Image:      m.Config.Image,
+			Command:    strings.Join(m.Config.Cmd, " "),
+			Status:     status,
+			Created:    t.UnixNano(),
+			Labels:     m.Config.Labels,
+			HostConfig: m.HostConfig,
+		}
+
+		containerList = append(containerList, container)
+	}
+	return EncodeResponse(rw, http.StatusOK, containerList)
 }
 
-func (s *Server) getContainer(ctx context.Context, resp http.ResponseWriter, req *http.Request) error {
+func (s *Server) getContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	name := mux.Vars(req)["name"]
-	ci, err := s.ContainerMgr.Get(name)
+	meta, err := s.ContainerMgr.Get(ctx, name)
 	if err != nil {
 		return err
 	}
 
-	c := types.ContainerJSON{
-		ID:      ci.ID,
-		Name:    ci.Name,
-		Image:   ci.Config.Image,
-		Created: ci.StartedAt,
-		State:   &types.ContainerState{Pid: ci.Pid},
+	container := types.ContainerJSON{
+		ID:         meta.ID,
+		Name:       meta.Name,
+		Image:      meta.Config.Image,
+		Created:    meta.Created,
+		State:      meta.State,
+		Config:     meta.Config,
+		HostConfig: meta.HostConfig,
 	}
-	resp.WriteHeader(http.StatusOK)
-	return json.NewEncoder(resp).Encode(c)
+	return EncodeResponse(rw, http.StatusOK, container)
 }

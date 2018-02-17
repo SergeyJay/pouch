@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -11,8 +12,9 @@ import (
 )
 
 // volumeDescription is used to describe volume command in detail and auto generate command doc.
-// TODO: add description
-var volumeDescription = ""
+var volumeDescription = "Manager the volumes in pouchd. " +
+	"It contains the functions of create/remove/list/inspect volume, 'driver' is used to list drivers that pouch support. " +
+	"The default volume driver is local, it will make a directory to bind into container."
 
 // VolumeCommand is used to implement 'volume' command.
 type VolumeCommand struct {
@@ -32,6 +34,8 @@ func (v *VolumeCommand) Init(c *Cli) {
 
 	c.AddCommand(v, &VolumeCreateCommand{})
 	c.AddCommand(v, &VolumeRemoveCommand{})
+	c.AddCommand(v, &VolumeInspectCommand{})
+	c.AddCommand(v, &VolumeListCommand{})
 }
 
 // RunE is the entry of VolumeCommand command.
@@ -40,8 +44,8 @@ func (v *VolumeCommand) RunE(args []string) error {
 }
 
 // volumeCreateDescription is used to describe volume create command in detail and auto generate command doc.
-// TODO: add description
-var volumeCreateDescription = ""
+var volumeCreateDescription = "Create a volume in pouchd. " +
+	"It must specify volume's name, size and driver. You can use 'volume driver' to get drivers that pouch support."
 
 // VolumeCreateCommand is used to implement 'volume create' command.
 type VolumeCreateCommand struct {
@@ -59,7 +63,7 @@ func (v *VolumeCreateCommand) Init(c *Cli) {
 	v.cli = c
 
 	v.cmd = &cobra.Command{
-		Use:   "create [args]",
+		Use:   "create [OPTIONS]",
 		Short: "Create a volume",
 		Long:  volumeCreateDescription,
 		Args:  cobra.NoArgs,
@@ -89,7 +93,7 @@ func (v *VolumeCreateCommand) runVolumeCreate(args []string) error {
 }
 
 func (v *VolumeCreateCommand) volumeCreate() error {
-	volumeReq := &types.VolumeCreateRequest{
+	volumeReq := &types.VolumeCreateConfig{
 		Driver:     v.driver,
 		Name:       v.name,
 		DriverOpts: map[string]string{},
@@ -100,8 +104,9 @@ func (v *VolumeCreateCommand) volumeCreate() error {
 		return err
 	}
 
+	ctx := context.Background()
 	apiClient := v.cli.Client()
-	volume, err := apiClient.VolumeCreate(volumeReq)
+	volume, err := apiClient.VolumeCreate(ctx, volumeReq)
 	if err != nil {
 		return err
 	}
@@ -110,14 +115,14 @@ func (v *VolumeCreateCommand) volumeCreate() error {
 	return nil
 }
 
-func parseVolume(volumeReq *types.VolumeCreateRequest, v *VolumeCreateCommand) error {
+func parseVolume(volumeCreateConfig *types.VolumeCreateConfig, v *VolumeCreateCommand) error {
 	// analyze labels.
 	for _, label := range v.labels {
 		l := strings.Split(label, "=")
-		if len(label) != 2 {
+		if len(l) != 2 {
 			return fmt.Errorf("unknown label %s: label format must be key=value", label)
 		}
-		volumeReq.Labels[l[0]] = l[1]
+		volumeCreateConfig.Labels[l[0]] = l[1]
 	}
 
 	// analyze options.
@@ -126,7 +131,7 @@ func parseVolume(volumeReq *types.VolumeCreateRequest, v *VolumeCreateCommand) e
 		if len(opt) != 2 {
 			return fmt.Errorf("unknown option %s: option format must be key=value", option)
 		}
-		volumeReq.DriverOpts[opt[0]] = opt[1]
+		volumeCreateConfig.DriverOpts[opt[0]] = opt[1]
 	}
 
 	// analyze selectors.
@@ -135,20 +140,24 @@ func parseVolume(volumeReq *types.VolumeCreateRequest, v *VolumeCreateCommand) e
 		if len(s) != 2 {
 			return fmt.Errorf("unknown selector %s: selector format must be key=value", selector)
 		}
-		volumeReq.DriverOpts["selector."+s[0]] = s[1]
+		volumeCreateConfig.DriverOpts["selector."+s[0]] = s[1]
 	}
 	return nil
 }
 
 // volumeCreateExample shows examples in volume create command, and is used in auto-generated cli docs.
-// TODO: add example
 func volumeCreateExample() string {
-	return ""
+	return `$ pouch volume create -d local -n pouch-volume -o size=100g
+Mountpoint:
+Name:         pouch-volume
+Scope:
+CreatedAt:
+Driver:       local`
 }
 
 // volumeRmDescription is used to describe volume rm command in detail and auto generate command doc.
-// TODO: add description
-var volumeRmDescription = ""
+var volumeRmDescription = "Remove a volume in pouchd. " +
+	"It must specify volume's name, and the volume will be removed when it is existent and unused."
 
 // VolumeRemoveCommand is used to implement 'volume rm' command.
 type VolumeRemoveCommand struct {
@@ -159,9 +168,9 @@ type VolumeRemoveCommand struct {
 func (v *VolumeRemoveCommand) Init(c *Cli) {
 	v.cli = c
 	v.cmd = &cobra.Command{
-		Use:     "remove <name>",
+		Use:     "remove [OPTIONS] NAME",
 		Aliases: []string{"rm"},
-		Short:   "Remove volume",
+		Short:   "Remove a volume",
 		Long:    volumeRmDescription,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -173,9 +182,7 @@ func (v *VolumeRemoveCommand) Init(c *Cli) {
 }
 
 // addFlags adds flags for specific command.
-func (v *VolumeRemoveCommand) addFlags() {
-	// TODO: add flags here
-}
+func (v *VolumeRemoveCommand) addFlags() {}
 
 // runVolumeRm is the entry of VolumeRemoveCommand command.
 func (v *VolumeRemoveCommand) runVolumeRm(args []string) error {
@@ -183,13 +190,137 @@ func (v *VolumeRemoveCommand) runVolumeRm(args []string) error {
 
 	logrus.Debugf("remove a volume: %s", name)
 
+	ctx := context.Background()
 	apiClient := v.cli.Client()
 
-	return apiClient.VolumeRemove(name)
+	err := apiClient.VolumeRemove(ctx, name)
+	if err == nil {
+		fmt.Printf("Removed: %s\n", name)
+	}
+
+	return err
 }
 
 // volumeRmExample shows examples in volume rm command, and is used in auto-generated cli docs.
-// TODO: add example
 func volumeRmExample() string {
-	return "Add volume create examples in code, not in doc."
+	return `$ pouch volume rm pouch-volume
+Removed: pouch-volume`
+}
+
+// volumeInspectDescription is used to describe volume inspect command in detail and auto generate command doc.
+var volumeInspectDescription = "Inspect a volume in pouchd. " +
+	"It must specify volume's name."
+
+// VolumeInspectCommand is used to implement 'volume inspect' command.
+type VolumeInspectCommand struct {
+	baseCommand
+}
+
+// Init initializes VolumeInspectCommand command.
+func (v *VolumeInspectCommand) Init(c *Cli) {
+	v.cli = c
+	v.cmd = &cobra.Command{
+		Use:   "inspect [OPTIONS] NAME",
+		Short: "Inspect a pouch volume",
+		Long:  volumeInspectDescription,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return v.runVolumeInspect(args)
+		},
+		Example: volumeInspectExample(),
+	}
+	v.addFlags()
+}
+
+// addFlags adds flags for specific command.
+func (v *VolumeInspectCommand) addFlags() {}
+
+// runVolumeInspect is the entry of VolumeInspectCommand command.
+func (v *VolumeInspectCommand) runVolumeInspect(args []string) error {
+	name := args[0]
+
+	logrus.Debugf("inspect a volume: %s", name)
+
+	ctx := context.Background()
+	apiClient := v.cli.Client()
+
+	resp, err := apiClient.VolumeInspect(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	v.cli.Print(resp)
+	return nil
+}
+
+// volumeInspectExample shows examples in volume inspect command, and is used in auto-generated cli docs.
+func volumeInspectExample() string {
+	return `$ pouch volume inspect pouch-volume
+Mountpoint:   /mnt/local/pouch-volume
+Name:         pouch-volume
+Scope:
+CreatedAt:    2018-1-17 14:09:30
+Driver:       local`
+}
+
+// volumeListDescription is used to describe volume list command in detail and auto generate command doc.
+var volumeListDescription = "List volumes in pouchd. " +
+	"It lists the volume's name"
+
+// VolumeListCommand is used to implement 'volume rm' command.
+type VolumeListCommand struct {
+	baseCommand
+}
+
+// Init initializes VolumeListCommand command.
+func (v *VolumeListCommand) Init(c *Cli) {
+	v.cli = c
+	v.cmd = &cobra.Command{
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List volumes",
+		Long:    volumeListDescription,
+		Args:    cobra.ExactArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return v.runVolumeList(args)
+		},
+		Example: volumeListExample(),
+	}
+	v.addFlags()
+}
+
+// addFlags adds flags for specific command.
+func (v *VolumeListCommand) addFlags() {}
+
+// runVolumeList is the entry of VolumeListCommand command.
+func (v *VolumeListCommand) runVolumeList(args []string) error {
+	logrus.Debugf("list the volumes")
+
+	ctx := context.Background()
+	apiClient := v.cli.Client()
+
+	volumeList, err := apiClient.VolumeList(ctx)
+	if err != nil {
+		return err
+	}
+
+	display := v.cli.NewTableDisplay()
+	display.AddRow([]string{"Name:"})
+
+	for _, v := range volumeList.Volumes {
+		display.AddRow([]string{v.Name})
+	}
+
+	display.Flush()
+
+	return nil
+}
+
+// volumeListExample shows examples in volume list command, and is used in auto-generated cli docs.
+func volumeListExample() string {
+	return `$ pouch volume list
+Name:
+pouch-volume-1
+pouch-volume-2
+pouch-volume-3`
 }

@@ -1,6 +1,28 @@
 package utils
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Common durations that is .
+// There are some definitions for units of Day and larger .
+const (
+	Second = time.Second
+	Minute = Second * 60
+	Hour   = Minute * 60
+	Day    = Hour * 24
+	Week   = Day * 7
+	Month  = Day * 30
+	Year   = Day * 365
+
+	TimeLayout = time.RFC3339Nano
+)
+
+var errInvalid = errors.New("invalid time")
 
 // If implements ternary operator. if cond is true return v1, or return v2 instead.
 func If(cond bool, v1, v2 interface{}) interface{} {
@@ -28,4 +50,74 @@ func FormatSize(size int64) string {
 	}
 
 	return fmt.Sprintf("%.2f %s", formattedSize, suffixes[count])
+}
+
+// FormatTimeInterval is used to show the time interval from input time to now.
+func FormatTimeInterval(input int64) (formattedTime string, err error) {
+	start := time.Unix(0, input)
+	diff := time.Now().Sub(start)
+
+	// That should not happen.
+	if diff < 0 {
+		return "", errInvalid
+	}
+
+	if diff >= Year {
+		year := int(diff / Year)
+		formattedTime += strconv.Itoa(year) + " year"
+		if year > 1 {
+			formattedTime += "s"
+		}
+	} else if diff >= Month {
+		month := int(diff / Month)
+		formattedTime += strconv.Itoa(month) + " month"
+		if month > 1 {
+			formattedTime += "s"
+		}
+	} else if diff >= Week {
+		week := int(diff / Week)
+		formattedTime += strconv.Itoa(week) + " week"
+		if week > 1 {
+			formattedTime += "s"
+		}
+	} else if diff >= Day {
+		day := int(diff / Day)
+		formattedTime += strconv.Itoa(day) + " day"
+		if day > 1 {
+			formattedTime += "s"
+		}
+	} else if diff >= Hour {
+		hour := int(diff / Hour)
+		formattedTime += strconv.Itoa(hour) + " hour"
+		if hour > 1 {
+			formattedTime += "s"
+		}
+	} else if diff >= Minute {
+		minute := int(diff / Minute)
+		formattedTime += strconv.Itoa(minute) + " minute"
+		if minute > 1 {
+			formattedTime += "s"
+		}
+	} else if diff >= Second {
+		second := int(diff / Second)
+		formattedTime += strconv.Itoa(second) + " second"
+		if second > 1 {
+			formattedTime += "s"
+		}
+	} else {
+		formattedTime += "0 second"
+	}
+
+	return formattedTime, nil
+}
+
+// TruncateID is used to transfer image ID from digest to short ID.
+func TruncateID(id string) string {
+	var shortLen = 12
+
+	id = strings.TrimPrefix(id, "sha256:")
+	if len(id) > shortLen {
+		return id[:shortLen]
+	}
+	return id
 }

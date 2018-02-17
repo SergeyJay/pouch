@@ -2,24 +2,59 @@ package ctrd
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/pkg/jsonstream"
+	"github.com/alibaba/pouch/pkg/reference"
 
 	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/errdefs"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/platforms"
 	"github.com/containerd/containerd/remotes"
 	digest "github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go/v1"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
+
+// GetOciImage returns the OCI Image.
+func (c *Client) GetOciImage(ctx context.Context, ref string) (v1.Image, error) {
+	var ociimage v1.Image
+
+	image, err := c.client.GetImage(ctx, ref)
+	if err != nil {
+		return v1.Image{}, err
+	}
+
+	ic, err := image.Config(ctx)
+	if err != nil {
+		return v1.Image{}, err
+	}
+	switch ic.MediaType {
+	case v1.MediaTypeImageConfig, images.MediaTypeDockerSchema2Config:
+		p, err := content.ReadBlob(ctx, image.ContentStore(), ic.Digest)
+		if err != nil {
+			return v1.Image{}, err
+		}
+
+		if err := json.Unmarshal(p, &ociimage); err != nil {
+			return v1.Image{}, err
+		}
+	default:
+		return v1.Image{}, fmt.Errorf("unknown image config media type %s", ic.MediaType)
+	}
+
+	return ociimage, nil
+}
 
 // RemoveImage deletes an image.
 func (c *Client) RemoveImage(ctx context.Context, ref string) error {
@@ -38,31 +73,53 @@ func (c *Client) ListImages(ctx context.Context, filter ...string) ([]types.Imag
 	}
 
 	images := make([]types.ImageInfo, 0, 32)
-	digestPrefix := "sha256:"
 	for _, image := range imageList {
 		descriptor := image.Target
-		digest := []byte(descriptor.Digest)
+		digest := descriptor.Digest
 
 		size, err := image.Size(ctx, c.client.ContentStore(), platforms.Default())
 		if err != nil {
 			return nil, err
 		}
 
-		images = append(images, types.ImageInfo{
-			Name:   image.Name,
-			ID:     string(digest[len(digestPrefix) : len(digestPrefix)+12]),
-			Digest: string(digest),
-			Size:   size,
-		})
+		refNamed, err := reference.ParseNamedReference(image.Name)
+		if err != nil {
+			return nil, err
+		}
+		refTagged := reference.WithDefaultTagIfMissing(refNamed).(reference.Tagged)
+
+		ociImage, err := c.GetOciImage(ctx, image.Name)
+		if err != nil {
+			return nil, err
+		}
+
+		// fill struct ImageInfo
+		imageInfo, err := ociImageToPouchImage(ociImage)
+		if err != nil {
+			return nil, err
+		}
+		imageInfo.Tag = refTagged.Tag()
+		imageInfo.Name = image.Name
+		imageInfo.Digest = digest.String()
+		imageInfo.Size = size
+
+		// generate image ID by imageInfo JSON.
+		imageID, err := generateID(&imageInfo)
+		if err != nil {
+			return nil, err
+		}
+		imageInfo.ID = imageID.String()
+
+		images = append(images, imageInfo)
 	}
 	return images, nil
 }
 
 // PullImage downloads an image from the remote repository.
-func (c *Client) PullImage(ctx context.Context, ref string, stream *jsonstream.JSONStream) (containerd.Image, error) {
+func (c *Client) PullImage(ctx context.Context, ref string, stream *jsonstream.JSONStream) (types.ImageInfo, error) {
 	resolver, err := resolver()
 	if err != nil {
-		return nil, err
+		return types.ImageInfo{}, err
 	}
 
 	ongoing := newJobs(ref)
@@ -96,7 +153,7 @@ func (c *Client) PullImage(ctx context.Context, ref string, stream *jsonstream.J
 	// start to pull image.
 	img, err := c.pullImage(ctx, ref, options)
 
-	// cancel fetch progress befor handle error.
+	// cancel fetch progress before handle error.
 	cancelProgress()
 	defer stream.Close()
 
@@ -110,11 +167,45 @@ func (c *Client) PullImage(ctx context.Context, ref string, stream *jsonstream.J
 		}
 		stream.WriteObject(messages)
 
-		return nil, err
+		return types.ImageInfo{}, err
+	}
+
+	// FIXME: please make sure that all the information about imageInfo is
+	// the same to what we do in the ListImages. If not, the imageInfo.ID will
+	// be different.
+	size, err := img.Size(ctx)
+	if err != nil {
+		return types.ImageInfo{}, err
 	}
 
 	logrus.Infof("success to pull image: %s", img.Name())
-	return img, nil
+
+	ociImage, err := c.GetOciImage(ctx, ref)
+	if err != nil {
+		return types.ImageInfo{}, err
+	}
+
+	imageInfo, err := ociImageToPouchImage(ociImage)
+
+	// fill struct ImageInfo
+	refNamed, err := reference.ParseNamedReference(img.Name())
+	if err != nil {
+		return types.ImageInfo{}, err
+	}
+	refTagged := reference.WithDefaultTagIfMissing(refNamed).(reference.Tagged)
+	imageInfo.Tag = refTagged.Tag()
+	imageInfo.Name = img.Name()
+	imageInfo.Digest = img.Target().Digest.String()
+	imageInfo.Size = size
+
+	// generate image ID by imageInfo JSON.
+	imageID, err := generateID(&imageInfo)
+	if err != nil {
+		return types.ImageInfo{}, err
+	}
+	imageInfo.ID = imageID.String()
+
+	return imageInfo, nil
 }
 
 func (c *Client) pullImage(ctx context.Context, ref string, options []containerd.RemoteOpt) (containerd.Image, error) {

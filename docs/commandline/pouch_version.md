@@ -7,7 +7,22 @@ Print versions about Pouch CLI and Pouchd
 Print versions about Pouch CLI and Pouchd
 
 ```
-pouch version [flags]
+pouch version
+```
+
+### Examples
+
+```
+$ pouch version
+GoVersion:       go1.9.1
+KernelVersion:
+Os:              linux
+Version:         0.1.0-dev
+APIVersion:      1.24
+Arch:            amd64
+BuildTime:       2017-12-18T07:48:56.348129663Z
+GitCommit:
+
 ```
 
 ### Options

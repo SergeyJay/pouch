@@ -1,19 +1,20 @@
 ## pouch volume remove
 
-Remove volume
+Remove a volume
 
 ### Synopsis
 
-Remove volume
+Remove a volume in pouchd. It must specify volume's name, and the volume will be removed when it is existent and unused.
 
 ```
-pouch volume remove <name> [flags]
+pouch volume remove [OPTIONS] NAME
 ```
 
 ### Examples
 
 ```
-Add volume create examples in code, not in doc.
+$ pouch volume rm pouch-volume
+Removed: pouch-volume
 ```
 
 ### Options

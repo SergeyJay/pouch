@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 )
 
@@ -19,7 +21,7 @@ func (rc *RenameCommand) Init(c *Cli) {
 	rc.cli = c
 
 	rc.cmd = &cobra.Command{
-		Use:   "rename [container] [newName]",
+		Use:   "rename CONTAINER NEWNAME",
 		Short: "Rename a container with newName",
 		Long:  renameDescription,
 		Args:  cobra.ExactArgs(2),
@@ -32,23 +34,22 @@ func (rc *RenameCommand) Init(c *Cli) {
 
 // runRename is the entry of rename command.
 func (rc *RenameCommand) runRename(args []string) error {
+	ctx := context.Background()
 	apiClient := rc.cli.Client()
 	container := args[0]
 	newName := args[1]
 
-	err := apiClient.ContainerRename(container, newName)
-
-	return err
+	return apiClient.ContainerRename(ctx, container, newName)
 }
 
 // renameExample shows examples in rename command, and is used in auto-generated cli docs.
 func renameExample() string {
 	return `$ pouch ps
-Name     ID       Status    Image
-foo      71b9c1   Running   docker.io/library/busybox:latest
+Name     ID       Status    Image                              Runtime
+foo      71b9c1   Running   docker.io/library/busybox:latest   runc
 $ pouch rename foo newName
 $ pouch ps
-Name     ID       Status    Image
-newName  71b9c1   Running   docker.io/library/busybox:latest
+Name     ID       Status    Image                              Runtime
+newName  71b9c1   Running   docker.io/library/busybox:latest   runc
 `
 }
