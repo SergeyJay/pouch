@@ -23,6 +23,7 @@ func initRoute(s *Server) http.Handler {
 	r.Path("/_ping").Methods(http.MethodGet).Handler(s.filter(s.ping))
 	r.Path("/info").Methods(http.MethodGet).Handler(s.filter(s.info))
 	r.Path("/version").Methods(http.MethodGet).Handler(s.filter(s.version))
+	r.Path("/auth").Methods(http.MethodPost).Handler(s.filter(s.auth))
 
 	// container
 	r.Path("/containers/create").Methods(http.MethodPost).Handler(s.filter(s.createContainer))
@@ -37,6 +38,7 @@ func initRoute(s *Server) http.Handler {
 	r.Path("/containers/{id:.*}/rename").Methods(http.MethodPost).Handler(s.filter(s.renameContainer))
 	r.Path("/containers/{name:.*}/pause").Methods(http.MethodPost).Handler(s.filter(s.pauseContainer))
 	r.Path("/containers/{name:.*}/unpause").Methods(http.MethodPost).Handler(s.filter(s.unpauseContainer))
+	r.Path("/containers/{name:.*}/update").Methods(http.MethodPost).Handler(s.filter(s.updateContainer))
 
 	// image
 	r.Path("/images/create").Methods(http.MethodPost).Handler(s.filter(s.pullImage))

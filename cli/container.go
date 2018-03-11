@@ -14,22 +14,28 @@ import (
 )
 
 type container struct {
-	labels               []string
-	name                 string
-	tty                  bool
-	volume               []string
-	runtime              string
-	env                  []string
-	entrypoint           string
-	workdir              string
-	user                 string
-	hostname             string
-	cpushare             int64
-	cpusetcpus           string
-	cpusetmems           string
-	memory               string
-	memorySwap           string
-	memorySwappiness     int64
+	labels           []string
+	name             string
+	tty              bool
+	volume           []string
+	runtime          string
+	env              []string
+	entrypoint       string
+	workdir          string
+	user             string
+	hostname         string
+	cpushare         int64
+	cpusetcpus       string
+	cpusetmems       string
+	memory           string
+	memorySwap       string
+	memorySwappiness int64
+
+	memoryWmarkRatio    int64
+	memoryExtra         int64
+	memoryForceEmptyCtl int64
+	scheLatSwitch       int64
+
 	devices              []string
 	enableLxcfs          bool
 	privileged           bool
@@ -48,6 +54,14 @@ type container struct {
 	blkioDeviceWriteBps  ThrottleBpsDevice
 	blkioDeviceReadIOps  ThrottleIOpsDevice
 	blkioDeviceWriteIOps ThrottleIOpsDevice
+	IntelRdtL3Cbm        string
+
+	cgroupParent string
+
+	//add for rich container mode
+	rich       bool
+	richMode   string
+	initScript string
 }
 
 func (c *container) config() (*types.ContainerCreateConfig, error) {
@@ -70,6 +84,11 @@ func (c *container) config() (*types.ContainerCreateConfig, error) {
 		return nil, err
 	}
 
+	intelRdtL3Cbm, err := parseIntelRdt(c.IntelRdtL3Cbm)
+	if err != nil {
+		return nil, err
+	}
+
 	deviceMappings, err := parseDeviceMappings(c.devices)
 	if err != nil {
 		return nil, err
@@ -86,10 +105,9 @@ func (c *container) config() (*types.ContainerCreateConfig, error) {
 	}
 
 	var networkMode string
-	// FIXME: Temporarily closed.
-	//if len(c.networks) == 0 {
-	//	networkMode = "bridge"
-	//}
+	if len(c.networks) == 0 {
+		networkMode = "bridge"
+	}
 	networkingConfig := &types.NetworkingConfig{
 		EndpointsConfig: map[string]*types.EndpointSettings{},
 	}
@@ -124,25 +142,38 @@ func (c *container) config() (*types.ContainerCreateConfig, error) {
 			User:       c.user,
 			Hostname:   strfmt.Hostname(c.hostname),
 			Labels:     labels,
+			Rich:       c.rich,
+			RichMode:   c.richMode,
+			InitScript: c.initScript,
 		},
 
 		HostConfig: &types.HostConfig{
 			Binds:   c.volume,
 			Runtime: c.runtime,
 			Resources: types.Resources{
-				CPUShares:            c.cpushare,
-				CpusetCpus:           c.cpusetcpus,
-				CpusetMems:           c.cpusetmems,
-				Devices:              deviceMappings,
-				Memory:               memory,
-				MemorySwap:           memorySwap,
-				MemorySwappiness:     &c.memorySwappiness,
+				CPUShares:        c.cpushare,
+				CpusetCpus:       c.cpusetcpus,
+				CpusetMems:       c.cpusetmems,
+				Devices:          deviceMappings,
+				Memory:           memory,
+				MemorySwap:       memorySwap,
+				MemorySwappiness: &c.memorySwappiness,
+				// FIXME: validate in client side
+				MemoryWmarkRatio:    &c.memoryWmarkRatio,
+				MemoryExtra:         &c.memoryExtra,
+				MemoryForceEmptyCtl: c.memoryForceEmptyCtl,
+				ScheLatSwitch:       c.scheLatSwitch,
+
+				// blkio
 				BlkioWeight:          c.blkioWeight,
 				BlkioWeightDevice:    c.blkioWeightDevice.value(),
 				BlkioDeviceReadBps:   c.blkioDeviceReadBps.value(),
 				BlkioDeviceReadIOps:  c.blkioDeviceReadIOps.value(),
 				BlkioDeviceWriteBps:  c.blkioDeviceWriteBps.value(),
 				BlkioDeviceWriteIOps: c.blkioDeviceWriteIOps.value(),
+				IntelRdtL3Cbm:        intelRdtL3Cbm,
+
+				CgroupParent: c.cgroupParent,
 			},
 			EnableLxcfs:   c.enableLxcfs,
 			Privileged:    c.privileged,
@@ -258,6 +289,11 @@ func validateMemorySwappiness(memorySwappiness int64) error {
 		return fmt.Errorf("invalid memory swappiness: %d (its range is -1 or 0-100)", memorySwappiness)
 	}
 	return nil
+}
+
+func parseIntelRdt(intelRdtL3Cbm string) (string, error) {
+	// FIXME: add Intel RDT L3 Cbm validation
+	return intelRdtL3Cbm, nil
 }
 
 func parseRestartPolicy(restartPolicy string) (*types.RestartPolicy, error) {

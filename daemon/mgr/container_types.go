@@ -8,7 +8,7 @@ import (
 
 	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/ctrd"
-	"github.com/alibaba/pouch/daemon/meta"
+	"github.com/alibaba/pouch/pkg/meta"
 	"github.com/alibaba/pouch/pkg/utils"
 
 	"github.com/opencontainers/image-spec/specs-go/v1"
@@ -144,6 +144,9 @@ type ContainerMeta struct {
 
 	// state
 	State *types.ContainerState `json:"State,omitempty"`
+
+	// BaseFS
+	BaseFS string
 }
 
 // Key returns container's id.
@@ -262,6 +265,11 @@ func (c *Container) IsCreated() bool {
 // IsPaused returns container is paused or not.
 func (c *Container) IsPaused() bool {
 	return c.meta.State.Status == types.StatusPaused
+}
+
+// IsRestarting returns container is restarting or not.
+func (c *Container) IsRestarting() bool {
+	return c.meta.State.Status == types.StatusRestarting
 }
 
 // Write writes container's meta data into meta store.

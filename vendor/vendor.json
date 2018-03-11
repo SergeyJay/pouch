@@ -3,12 +3,6 @@
 	"ignore": "test",
 	"package": [
 		{
-			"checksumSHA1": "pkj2Ye4zdp0xPbL3kMwYevlpwQo=",
-			"path": "code.cloudfoundry.org/bytefmt",
-			"revision": "f4415fafc5619dd75599a54a7c91fb3948ad58bd",
-			"revisionTime": "2017-04-28T00:31:08Z"
-		},
-		{
 			"checksumSHA1": "FU/snvk/G/MqCWeKVnTyCKx+Y5M=",
 			"path": "github.com/Microsoft/go-winio/vhd",
 			"revision": ""
@@ -421,6 +415,18 @@
 			"path": "github.com/docker/go-units",
 			"revision": "2b8ed96d2a422bf205adcdfa05272dc12c81613b",
 			"revisionTime": "2017-11-08T19:22:26Z"
+		},
+		{
+			"checksumSHA1": "5Z0J6IIV39bPOf0NOVHLolGwcfo=",
+			"path": "github.com/docker/spdystream",
+			"revision": "bc6354cbbc295e925e4c611ffe90c1f287ee54db",
+			"revisionTime": "2017-09-12T18:36:27Z"
+		},
+		{
+			"checksumSHA1": "Gaf5SDyC0xV32LdjPCyUGvH5BhI=",
+			"path": "github.com/docker/spdystream/spdy",
+			"revision": "bc6354cbbc295e925e4c611ffe90c1f287ee54db",
+			"revisionTime": "2017-09-12T18:36:27Z"
 		},
 		{
 			"checksumSHA1": "40Ns85VYa4smQPcewZ7SOdfLnKU=",

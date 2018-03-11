@@ -9,10 +9,10 @@ import (
 	cri "github.com/alibaba/pouch/cri/service"
 	"github.com/alibaba/pouch/ctrd"
 	"github.com/alibaba/pouch/daemon/config"
-	"github.com/alibaba/pouch/daemon/meta"
 	"github.com/alibaba/pouch/daemon/mgr"
 	"github.com/alibaba/pouch/internal"
 	"github.com/alibaba/pouch/network/mode"
+	"github.com/alibaba/pouch/pkg/meta"
 
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
@@ -42,6 +42,7 @@ type router struct {
 // NewDaemon constructs a brand new server.
 func NewDaemon(cfg config.Config) *Daemon {
 	containerStore, err := meta.NewStore(meta.Config{
+		Driver:  "local",
 		BaseDir: path.Join(cfg.HomeDir, "containers"),
 		Buckets: []meta.Bucket{
 			{
@@ -150,11 +151,21 @@ func (d *Daemon) Run() error {
 		close(grpcServerCloseCh)
 	}()
 
+	streamServerCloseCh := make(chan struct{})
+	go func() {
+		if d.criMgr.StreamServerStart(); err != nil {
+			logrus.Errorf("failed to start stream server: %v", err)
+		}
+		close(streamServerCloseCh)
+	}()
+
 	// Stop pouchd if both server stopped.
 	<-httpServerCloseCh
 	logrus.Infof("HTTP server stopped")
 	<-grpcServerCloseCh
 	logrus.Infof("GRPC server stopped")
+	<-streamServerCloseCh
+	logrus.Infof("Stream server stopped")
 	return nil
 }
 

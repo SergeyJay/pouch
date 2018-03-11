@@ -117,3 +117,15 @@ func setupCapabilities(ctx context.Context, meta *ContainerMeta, spec *SpecWrapp
 
 	return nil
 }
+
+func setupIntelRdt(ctx context.Context, meta *ContainerMeta, spec *SpecWrapper) error {
+	s := spec.s
+
+	if meta.HostConfig.IntelRdtL3Cbm != "" {
+		s.Linux.IntelRdt = &specs.LinuxIntelRdt{
+			L3CacheSchema: meta.HostConfig.IntelRdtL3Cbm,
+		}
+	}
+
+	return nil
+}

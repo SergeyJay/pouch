@@ -6,14 +6,14 @@ import (
 	"time"
 
 	apitypes "github.com/alibaba/pouch/apis/types"
+	"github.com/alibaba/pouch/cri/stream"
 	"github.com/alibaba/pouch/ctrd"
 	"github.com/alibaba/pouch/daemon/config"
 	"github.com/alibaba/pouch/pkg/reference"
 	"github.com/alibaba/pouch/version"
 
-	"github.com/sirupsen/logrus"
-
 	// NOTE: "golang.org/x/net/context" is compatible with standard "context" in golang1.7+.
+	"github.com/cri-o/ocicni/pkg/ocicni"
 	"golang.org/x/net/context"
 	"k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
 )
@@ -43,6 +43,11 @@ const (
 	nameDelimiter = "_"
 
 	defaultSandboxImage = "k8s.gcr.io/pause-amd64:3.0"
+
+	// Address and port of stream server.
+	// TODO: specify them in the parameters of pouchd.
+	streamServerAddress = ""
+	streamServerPort    = "10010"
 )
 
 var (
@@ -57,6 +62,9 @@ type CriMgr interface {
 
 	// ImageServiceServer is interface of CRI image service.
 	runtime.ImageServiceServer
+
+	// StreamServerStart starts the stream server of CRI.
+	StreamServerStart() error
 }
 
 // CriManager is an implementation of interface CriMgr.
@@ -64,20 +72,29 @@ type CriManager struct {
 	ContainerMgr ContainerMgr
 	ImageMgr     ImageMgr
 	CniMgr       CniMgr
+
+	// StreamServer is the stream server of CRI serves container streaming request.
+	StreamServer stream.Server
 }
 
 // NewCriManager creates a brand new cri manager.
 func NewCriManager(config *config.Config, ctrMgr ContainerMgr, imgMgr ImageMgr) (*CriManager, error) {
-	cniMgr, err := NewCniManager(&config.CriConfig)
+	streamServer, err := newStreamServer(ctrMgr, streamServerAddress, streamServerPort)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new cni manager: %v", err)
+		return nil, fmt.Errorf("failed to create stream server for cri manager: %v", err)
 	}
 
 	return &CriManager{
 		ContainerMgr: ctrMgr,
 		ImageMgr:     imgMgr,
-		CniMgr:       cniMgr,
+		CniMgr:       NewCniManager(&config.CriConfig),
+		StreamServer: streamServer,
 	}, nil
+}
+
+// StreamServerStart starts the stream server of CRI.
+func (c *CriManager) StreamServerStart() error {
+	return c.StreamServer.Start()
 }
 
 // TODO: Move the underlying functions to their respective files in the future.
@@ -132,14 +149,20 @@ func (c *CriManager) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 	if err != nil {
 		return nil, err
 	}
-	netnsPath, err := containerNetns(container)
+	netnsPath := containerNetns(container)
+	if netnsPath == "" {
+		return nil, fmt.Errorf("failed to find network namespace path for sandbox %q", id)
+	}
+
+	err = c.CniMgr.SetUpPodNetwork(&ocicni.PodNetwork{
+		Name:         config.GetMetadata().GetName(),
+		Namespace:    config.GetMetadata().GetNamespace(),
+		ID:           id,
+		NetNS:        netnsPath,
+		PortMappings: toCNIPortMappings(config.GetPortMappings()),
+	})
 	if err != nil {
 		return nil, err
-	}
-	err = c.CniMgr.SetUpPodNetwork(config, id, netnsPath)
-	if err != nil {
-		// If setup network failed, don't break now.
-		logrus.Errorf("failed to setup network for sandbox %q: %v", id, err)
 	}
 
 	return &runtime.RunPodSandboxResponse{PodSandboxId: id}, nil
@@ -168,7 +191,31 @@ func (c *CriManager) StopPodSandbox(ctx context.Context, r *runtime.StopPodSandb
 		}
 	}
 
-	// TODO: tear down sandbox's network.
+	// Tear down sandbox's network.
+	container, err := c.ContainerMgr.Get(ctx, podSandboxID)
+	if err != nil {
+		return nil, err
+	}
+	netnsPath := containerNetns(container)
+	if netnsPath == "" {
+		return nil, fmt.Errorf("failed to find network namespace path for sandbox %q", podSandboxID)
+	}
+
+	metadata, err := parseSandboxName(container.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse metadata of sandbox %q from container name: %v", podSandboxID, err)
+	}
+
+	err = c.CniMgr.TearDownPodNetwork(&ocicni.PodNetwork{
+		Name:      metadata.GetName(),
+		Namespace: metadata.GetNamespace(),
+		ID:        podSandboxID,
+		NetNS:     netnsPath,
+		// TODO: get portmapping configuration.
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Stop the sandbox container.
 	err = c.ContainerMgr.Stop(ctx, podSandboxID, defaultStopTimeout)
@@ -236,6 +283,17 @@ func (c *CriManager) PodSandboxStatus(ctx context.Context, r *runtime.PodSandbox
 		return nil, fmt.Errorf("failed to get status of sandbox %q: %v", podSandboxID, err)
 	}
 	labels, annotations := extractLabels(sandbox.Config.Labels)
+
+	// TODO: check if the sandbox's network is in host mode.
+	var ip string
+	netnsPath := containerNetns(sandbox)
+	if netnsPath != "" {
+		ip, err = c.CniMgr.GetPodNetworkStatus(netnsPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	status := &runtime.PodSandboxStatus{
 		Id:          sandbox.ID,
 		State:       state,
@@ -243,7 +301,8 @@ func (c *CriManager) PodSandboxStatus(ctx context.Context, r *runtime.PodSandbox
 		Metadata:    metadata,
 		Labels:      labels,
 		Annotations: annotations,
-		// TODO: network status and linux specific pod status.
+		Network:     &runtime.PodSandboxNetworkStatus{Ip: ip},
+		// TODO: linux specific pod status.
 	}
 
 	return &runtime.PodSandboxStatusResponse{Status: status}, nil
@@ -562,17 +621,17 @@ func (c *CriManager) ExecSync(ctx context.Context, r *runtime.ExecSyncRequest) (
 
 // Exec prepares a streaming endpoint to execute a command in the container, and returns the address.
 func (c *CriManager) Exec(ctx context.Context, r *runtime.ExecRequest) (*runtime.ExecResponse, error) {
-	return nil, fmt.Errorf("Exec Not Implemented Yet")
+	return c.StreamServer.GetExec(r)
 }
 
 // Attach prepares a streaming endpoint to attach to a running container, and returns the address.
 func (c *CriManager) Attach(ctx context.Context, r *runtime.AttachRequest) (*runtime.AttachResponse, error) {
-	return nil, fmt.Errorf("Attach Not Implemented Yet")
+	return c.StreamServer.GetAttach(r)
 }
 
 // PortForward prepares a streaming endpoint to forward ports from a PodSandbox, and returns the address.
 func (c *CriManager) PortForward(ctx context.Context, r *runtime.PortForwardRequest) (*runtime.PortForwardResponse, error) {
-	return nil, fmt.Errorf("PortForward Not Implemented Yet")
+	return c.StreamServer.GetPortForward(r)
 }
 
 // UpdateRuntimeConfig updates the runtime config. Currently only handles podCIDR updates.
@@ -656,7 +715,7 @@ func (c *CriManager) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	}
 	taggedRef := reference.WithDefaultTagIfMissing(namedRef).(reference.Tagged)
 
-	err = c.ImageMgr.PullImage(ctx, taggedRef.Name(), taggedRef.Tag(), bytes.NewBuffer([]byte{}))
+	err = c.ImageMgr.PullImage(ctx, taggedRef.Name(), taggedRef.Tag(), nil, bytes.NewBuffer([]byte{}))
 	if err != nil {
 		return nil, err
 	}

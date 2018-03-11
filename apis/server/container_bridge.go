@@ -254,6 +254,12 @@ func (s *Server) getContainers(ctx context.Context, rw http.ResponseWriter, req 
 			HostConfig: m.HostConfig,
 		}
 
+		if m.NetworkSettings != nil {
+			container.NetworkSettings = &types.ContainerNetworkSettings{
+				Networks: m.NetworkSettings.Networks,
+			}
+		}
+
 		containerList = append(containerList, container)
 	}
 	return EncodeResponse(rw, http.StatusOK, containerList)
@@ -275,5 +281,33 @@ func (s *Server) getContainer(ctx context.Context, rw http.ResponseWriter, req *
 		Config:     meta.Config,
 		HostConfig: meta.HostConfig,
 	}
+
+	if meta.NetworkSettings != nil {
+		container.NetworkSettings = &types.NetworkSettings{
+			Networks: meta.NetworkSettings.Networks,
+		}
+	}
+
 	return EncodeResponse(rw, http.StatusOK, container)
+}
+
+func (s *Server) updateContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	config := &types.UpdateConfig{}
+	// decode request body
+	if err := json.NewDecoder(req.Body).Decode(config); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+	// validate request body
+	if err := config.Validate(strfmt.NewFormats()); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+
+	name := mux.Vars(req)["name"]
+
+	if err := s.ContainerMgr.Update(ctx, name, config); err != nil {
+		return httputils.NewHTTPError(err, http.StatusInternalServerError)
+	}
+
+	rw.WriteHeader(http.StatusOK)
+	return nil
 }
