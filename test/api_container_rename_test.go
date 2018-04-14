@@ -19,6 +19,7 @@ func init() {
 // SetUpTest does common setup in the beginning of each test.
 func (suite *APIContainerRenameSuite) SetUpTest(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
+	PullImage(c, busyboxImage)
 }
 
 // TestRenameOk test create api is ok with default parameters.

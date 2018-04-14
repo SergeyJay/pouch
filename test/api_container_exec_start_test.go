@@ -21,6 +21,7 @@ func init() {
 // SetUpTest does common setup in the beginning of each test.
 func (suite *APIContainerExecStartSuite) SetUpTest(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
+	PullImage(c, busyboxImage)
 }
 
 func checkEchoSuccess(c *check.C, conn net.Conn, br *bufio.Reader, exp string) {

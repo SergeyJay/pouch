@@ -19,6 +19,7 @@ func init() {
 // SetUpTest does common setup in the beginning of each test.
 func (suite *APIContainerStartSuite) SetUpTest(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
+	PullImage(c, busyboxImage)
 }
 
 // TestStartOk tests starting container could work.

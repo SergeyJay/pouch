@@ -14,7 +14,7 @@ import (
 	"github.com/gotestyourself/gotestyourself/icmd"
 )
 
-// PouchUpdateSuite is the test suite for help CLI.
+// PouchUpdateSuite is the test suite for update CLI.
 type PouchUpdateSuite struct{}
 
 func init() {
@@ -27,16 +27,51 @@ func (suite *PouchUpdateSuite) SetUpSuite(c *check.C) {
 
 	environment.PruneAllContainers(apiClient)
 
-	command.PouchRun("pull", busyboxImage).Assert(c, icmd.Success)
+	PullImage(c, busyboxImage)
 }
 
 // TearDownTest does cleanup work in the end of each test.
 func (suite *PouchUpdateSuite) TearDownTest(c *check.C) {
 }
 
-// TestUpdateMemory is to verify the correctness of updating container memory.
-func (suite *PouchUpdateSuite) TestUpdateMemory(c *check.C) {
-	//TODO
+// TestUpdateCpu is to verify the correctness of updating container cpu.
+func (suite *PouchUpdateSuite) TestUpdateCpu(c *check.C) {
+	name := "update-container-cpu"
+
+	command.PouchRun("run", "-d", "--cpu-share", "20", "--name", name, busyboxImage).Assert(c, icmd.Success)
+
+	output := command.PouchRun("inspect", name).Stdout()
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+	containerID := result[0].ID
+
+	file := "/sys/fs/cgroup/cpu/default/" + containerID + "/cpu.shares"
+	if _, err := os.Stat(file); err != nil {
+		c.Fatalf("container %s cgroup mountpoint not exists", containerID)
+	}
+
+	command.PouchRun("update", "--cpu-share", "40", name).Assert(c, icmd.Success)
+
+	out, err := exec.Command("cat", file).Output()
+	if err != nil {
+		c.Fatalf("execute cat command failed: %v", err)
+	}
+
+	if !strings.Contains(string(out), "40") {
+		c.Fatalf("unexpected output %s expected %s\n", string(out), "40")
+	}
+
+	inspectInfo := command.PouchRun("inspect", name).Stdout()
+	metaJSON := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(inspectInfo), &metaJSON); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+
+	c.Assert(metaJSON[0].HostConfig.CPUShares, check.Equals, int64(40))
+
+	command.PouchRun("rm", "-f", name).Assert(c, icmd.Success)
 }
 
 // TestUpdateRunningContainer is to verify the correctness of updating a running container.
@@ -46,11 +81,11 @@ func (suite *PouchUpdateSuite) TestUpdateRunningContainer(c *check.C) {
 	command.PouchRun("run", "-d", "-m", "300M", "--name", name, busyboxImage).Assert(c, icmd.Success)
 
 	output := command.PouchRun("inspect", name).Stdout()
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	containerID := result.ID
+	containerID := result[0].ID
 
 	file := "/sys/fs/cgroup/memory/default/" + containerID + "/memory.limit_in_bytes"
 	if _, err := os.Stat(file); err != nil {
@@ -67,6 +102,16 @@ func (suite *PouchUpdateSuite) TestUpdateRunningContainer(c *check.C) {
 	if !strings.Contains(string(out), "524288000") {
 		c.Fatalf("unexpected output %s expected %s\n", string(out), "524288000")
 	}
+
+	inspectInfo := command.PouchRun("inspect", name).Stdout()
+	metaJSON := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(inspectInfo), &metaJSON); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+
+	c.Assert(metaJSON[0].HostConfig.Memory, check.Equals, int64(524288000))
+
+	command.PouchRun("rm", "-f", name).Assert(c, icmd.Success)
 }
 
 // TestUpdateStoppedContainer is to verify the correctness of updating a stopped container.
@@ -76,11 +121,11 @@ func (suite *PouchUpdateSuite) TestUpdateStoppedContainer(c *check.C) {
 	command.PouchRun("create", "-m", "300M", "--name", name, busyboxImage).Assert(c, icmd.Success)
 
 	output := command.PouchRun("inspect", name).Stdout()
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	containerID := result.ID
+	containerID := result[0].ID
 
 	command.PouchRun("update", "-m", "500M", name).Assert(c, icmd.Success)
 
@@ -99,6 +144,16 @@ func (suite *PouchUpdateSuite) TestUpdateStoppedContainer(c *check.C) {
 	if !strings.Contains(string(out), "524288000") {
 		c.Fatalf("unexpected output %s expected %s\n", string(out), "524288000")
 	}
+
+	inspectInfo := command.PouchRun("inspect", name).Stdout()
+	metaJSON := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(inspectInfo), &metaJSON); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+
+	c.Assert(metaJSON[0].HostConfig.Memory, check.Equals, int64(524288000))
+
+	command.PouchRun("rm", "-f", name).Assert(c, icmd.Success)
 }
 
 // TestUpdateContainerInvalidValue is to verify the correctness of updating a container with invalid value.
@@ -107,10 +162,15 @@ func (suite *PouchUpdateSuite) TestUpdateContainerInvalidValue(c *check.C) {
 
 	command.PouchRun("run", "-d", "-m", "300M", "--name", name, busyboxImage).Assert(c, icmd.Success)
 
-	res := command.PouchRun("update", "-m", "2M", name)
-	c.Assert(res.Error, check.IsNil)
+	res := command.PouchRun("update", "--memory-swappiness", "-2", name)
+	c.Assert(res.Error, check.NotNil)
 
-	// TODO add invalid value test.
+	expectString := "invalid memory swappiness: -2 (its range is -1 or 0-100)"
+	if out := res.Combined(); !strings.Contains(out, expectString) {
+		c.Fatalf("unexpected output %s expected %s", out, expectString)
+	}
+
+	command.PouchRun("rm", "-f", name).Assert(c, icmd.Success)
 }
 
 // TestUpdateContainerWithoutFlag is to verify the correctness of updating a container without any flag.
@@ -121,4 +181,5 @@ func (suite *PouchUpdateSuite) TestUpdateContainerWithoutFlag(c *check.C) {
 
 	command.PouchRun("update", name).Assert(c, icmd.Success)
 
+	command.PouchRun("rm", "-f", name).Assert(c, icmd.Success)
 }

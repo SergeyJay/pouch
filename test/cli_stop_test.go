@@ -5,11 +5,12 @@ import (
 
 	"github.com/alibaba/pouch/test/command"
 	"github.com/alibaba/pouch/test/environment"
+
 	"github.com/go-check/check"
 	"github.com/gotestyourself/gotestyourself/icmd"
 )
 
-// PouchStopSuite is the test suite fo help CLI.
+// PouchStopSuite is the test suite for stop CLI.
 type PouchStopSuite struct{}
 
 func init() {
@@ -22,7 +23,7 @@ func (suite *PouchStopSuite) SetUpSuite(c *check.C) {
 
 	environment.PruneAllContainers(apiClient)
 
-	command.PouchRun("pull", busyboxImage).Assert(c, icmd.Success)
+	PullImage(c, busyboxImage)
 }
 
 // TearDownTest does cleanup work in the end of each test.
@@ -34,7 +35,7 @@ func (suite *PouchStopSuite) TestStopWorks(c *check.C) {
 	name := "stop-normal"
 
 	command.PouchRun("create", "--name", name, busyboxImage).Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 

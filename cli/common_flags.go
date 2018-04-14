@@ -20,6 +20,8 @@ func addCommonFlags(flagSet *pflag.FlagSet) *container {
 	flagSet.Int64Var(&c.cpushare, "cpu-share", 0, "CPU shares (relative weight)")
 	flagSet.StringVar(&c.cpusetcpus, "cpuset-cpus", "", "CPUs in which to allow execution (0-3, 0,1)")
 	flagSet.StringVar(&c.cpusetmems, "cpuset-mems", "", "MEMs in which to allow execution (0-3, 0,1)")
+	flagSet.Int64Var(&c.cpuperiod, "cpu-period", 0, "Limit CPU CFS (Completely Fair Scheduler) period, range is in [1000(1ms),1000000(1s)]")
+	flagSet.Int64Var(&c.cpuquota, "cpu-quota", 0, "Limit CPU CFS (Completely Fair Scheduler) quota, range is in [1000,∞)")
 
 	// device related options
 	flagSet.StringSliceVarP(&c.devices, "device", "", nil, "Add a host device to the container")
@@ -48,10 +50,14 @@ func addCommonFlags(flagSet *pflag.FlagSet) *container {
 	flagSet.Int64Var(&c.memoryWmarkRatio, "memory-wmark-ratio", 0, "Represent this container's memory low water mark percentage, range in [0, 100]. The value of memory low water mark is memory.limit_in_bytes * MemoryWmarkRatio")
 	flagSet.Int64Var(&c.memoryExtra, "memory-extra", 0, "Represent container's memory high water mark percentage, range in [0, 100]")
 	flagSet.Int64Var(&c.memoryForceEmptyCtl, "memory-force-empty-ctl", 0, "Whether to reclaim page cache when deleting the cgroup of container")
+	flagSet.BoolVar(&c.oomKillDisable, "oom-kill-disable", false, "Disable OOM Killer")
+	flagSet.Int64Var(&c.oomScoreAdj, "oom-score-adj", -500, "Tune host's OOM preferences (-1000 to 1000)")
 
 	flagSet.StringVar(&c.name, "name", "", "Specify name of container")
 
 	flagSet.StringSliceVar(&c.networks, "net", nil, "Set networks to container")
+	flagSet.StringSliceVarP(&c.ports, "port", "p", nil, "Set container ports mapping")
+	flagSet.StringSliceVar(&c.expose, "expose", nil, "Set expose container's ports")
 
 	flagSet.StringVar(&c.pidMode, "pid", "", "PID namespace to use")
 	flagSet.BoolVar(&c.privileged, "privileged", false, "Give extended privileges to the container")
@@ -69,9 +75,11 @@ func addCommonFlags(flagSet *pflag.FlagSet) *container {
 	// user
 	flagSet.StringVarP(&c.user, "user", "u", "", "UID")
 
+	flagSet.StringSliceVar(&c.groupAdd, "group-add", nil, "Add additional groups to join")
+
 	flagSet.StringVar(&c.utsMode, "uts", "", "UTS namespace to use")
 
-	flagSet.StringSliceVarP(&c.volume, "volume", "v", nil, "Bind mount volumes to container")
+	flagSet.StringSliceVarP(&c.volume, "volume", "v", nil, "Bind mount volumes to container, format is: [source:]<destination>[:mode], [source] can be volume or host's path, <destination> is container's path, [mode] can be \"ro/rw/dr/rr/z/Z/nocopy/private/rprivate/slave/rslave/shared/rshared\"")
 
 	flagSet.StringVarP(&c.workdir, "workdir", "w", "", "Set the working directory in a container")
 
@@ -81,6 +89,12 @@ func addCommonFlags(flagSet *pflag.FlagSet) *container {
 
 	// cgroup
 	flagSet.StringVarP(&c.cgroupParent, "cgroup-parent", "", "default", "Optional parent cgroup for the container")
+
+	// disk quota
+	flagSet.StringSliceVar(&c.diskQuota, "disk-quota", nil, "Set disk quota for container")
+
+	// additional runtime spec annotations
+	flagSet.StringSliceVar(&c.specAnnotation, "annotation", nil, "Additional annotation for runtime")
 
 	return c
 }

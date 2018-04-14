@@ -18,6 +18,7 @@ func init() {
 // SetUpTest does common setup in the beginning of each test.
 func (suite *APIContainerInspectSuite) SetUpTest(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
+	PullImage(c, busyboxImage)
 }
 
 // TestInspectNoSuchContainer tests inspecting a container that doesn't exits return error.

@@ -25,9 +25,14 @@ type Endpoint struct {
 	NetworkDisabled bool
 	NetworkMode     string
 	MacAddress      string
+	PublishAllPorts bool
 	ExposedPorts    map[string]interface{}
-	PortBindings    map[string]types.PortBinding
+	PortBindings    types.PortMap
 
 	NetworkConfig  *types.NetworkSettings
 	EndpointConfig *types.EndpointSettings
+
+	GenericParams   map[string]interface{}
+	Priority        int
+	DisableResolver bool
 }

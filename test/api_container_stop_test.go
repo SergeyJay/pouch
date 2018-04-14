@@ -19,6 +19,7 @@ func init() {
 // SetUpTest does common setup in the beginning of each test.
 func (suite *APIContainerStopSuite) SetUpTest(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
+	PullImage(c, busyboxImage)
 }
 
 // TestStopOk tests a running container could be stopped.

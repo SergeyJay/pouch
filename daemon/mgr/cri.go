@@ -3,17 +3,22 @@ package mgr
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
 	"time"
 
 	apitypes "github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/cri/stream"
-	"github.com/alibaba/pouch/ctrd"
 	"github.com/alibaba/pouch/daemon/config"
+	"github.com/alibaba/pouch/pkg/collect"
 	"github.com/alibaba/pouch/pkg/reference"
 	"github.com/alibaba/pouch/version"
 
 	// NOTE: "golang.org/x/net/context" is compatible with standard "context" in golang1.7+.
 	"github.com/cri-o/ocicni/pkg/ocicni"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/net/context"
 	"k8s.io/kubernetes/pkg/kubelet/apis/cri/v1alpha1/runtime"
 )
@@ -48,6 +53,12 @@ const (
 	// TODO: specify them in the parameters of pouchd.
 	streamServerAddress = ""
 	streamServerPort    = "10010"
+
+	namespaceModeHost = "host"
+	namespaceModeNone = "none"
+
+	// resolvConfPath is the abs path of resolv.conf on host or container.
+	resolvConfPath = "/etc/resolv.conf"
 )
 
 var (
@@ -75,21 +86,31 @@ type CriManager struct {
 
 	// StreamServer is the stream server of CRI serves container streaming request.
 	StreamServer stream.Server
+
+	// SandboxBaseDir is the directory used to store sandbox files like /etc/hosts, /etc/resolv.conf, etc.
+	SandboxBaseDir string
+
+	// SandboxStore stores the configuration of sandboxes.
+	SandboxStore *collect.SafeMap
 }
 
 // NewCriManager creates a brand new cri manager.
-func NewCriManager(config *config.Config, ctrMgr ContainerMgr, imgMgr ImageMgr) (*CriManager, error) {
+func NewCriManager(config *config.Config, ctrMgr ContainerMgr, imgMgr ImageMgr) (CriMgr, error) {
 	streamServer, err := newStreamServer(ctrMgr, streamServerAddress, streamServerPort)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stream server for cri manager: %v", err)
 	}
 
-	return &CriManager{
-		ContainerMgr: ctrMgr,
-		ImageMgr:     imgMgr,
-		CniMgr:       NewCniManager(&config.CriConfig),
-		StreamServer: streamServer,
-	}, nil
+	c := &CriManager{
+		ContainerMgr:   ctrMgr,
+		ImageMgr:       imgMgr,
+		CniMgr:         NewCniManager(&config.CriConfig),
+		StreamServer:   streamServer,
+		SandboxBaseDir: path.Join(config.HomeDir, "sandboxes"),
+		SandboxStore:   collect.NewSafeMap(),
+	}
+
+	return NewCriWrapper(c), nil
 }
 
 // StreamServerStart starts the stream server of CRI.
@@ -144,26 +165,50 @@ func (c *CriManager) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 		return nil, fmt.Errorf("failed to start sandbox container for pod %q: %v", config.Metadata.Name, err)
 	}
 
-	// Step 4: Setup networking for the sandbox.
-	container, err := c.ContainerMgr.Get(ctx, id)
+	sandboxRootDir := path.Join(c.SandboxBaseDir, id)
+	err = os.MkdirAll(sandboxRootDir, 0755)
 	if err != nil {
-		return nil, err
-	}
-	netnsPath := containerNetns(container)
-	if netnsPath == "" {
-		return nil, fmt.Errorf("failed to find network namespace path for sandbox %q", id)
+		return nil, fmt.Errorf("failed to create sandbox root directory: %v", err)
 	}
 
-	err = c.CniMgr.SetUpPodNetwork(&ocicni.PodNetwork{
-		Name:         config.GetMetadata().GetName(),
-		Namespace:    config.GetMetadata().GetNamespace(),
-		ID:           id,
-		NetNS:        netnsPath,
-		PortMappings: toCNIPortMappings(config.GetPortMappings()),
-	})
+	// Setup sandbox file /etc/resolv.conf.
+	err = setupSandboxFiles(sandboxRootDir, config)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to setup sandbox files: %v", err)
 	}
+
+	// Step 4: Setup networking for the sandbox.
+	var netnsPath string
+	securityContext := config.GetLinux().GetSecurityContext()
+	hostNet := securityContext.GetNamespaceOptions().GetHostNetwork()
+	// If it is in host network, no need to configure the network of sandbox.
+	if !hostNet {
+		container, err := c.ContainerMgr.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		netnsPath = containerNetns(container)
+		if netnsPath == "" {
+			return nil, fmt.Errorf("failed to find network namespace path for sandbox %q", id)
+		}
+
+		err = c.CniMgr.SetUpPodNetwork(&ocicni.PodNetwork{
+			Name:         config.GetMetadata().GetName(),
+			Namespace:    config.GetMetadata().GetNamespace(),
+			ID:           id,
+			NetNS:        netnsPath,
+			PortMappings: toCNIPortMappings(config.GetPortMappings()),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sandboxMeta := &SandboxMeta{
+		Config:    config,
+		NetNSPath: netnsPath,
+	}
+	c.SandboxStore.Put(id, sandboxMeta)
 
 	return &runtime.RunPodSandboxResponse{PodSandboxId: id}, nil
 }
@@ -172,6 +217,11 @@ func (c *CriManager) RunPodSandbox(ctx context.Context, r *runtime.RunPodSandbox
 // sandbox, they should be forcibly terminated.
 func (c *CriManager) StopPodSandbox(ctx context.Context, r *runtime.StopPodSandboxRequest) (*runtime.StopPodSandboxResponse, error) {
 	podSandboxID := r.GetPodSandboxId()
+	res, ok := c.SandboxStore.Get(podSandboxID).Result()
+	if !ok {
+		return nil, fmt.Errorf("failed to get metadata of %q from SandboxStore", podSandboxID)
+	}
+	sandboxMeta := res.(*SandboxMeta)
 
 	opts := &ContainerListOption{All: true}
 	filter := func(c *ContainerMeta) bool {
@@ -191,30 +241,30 @@ func (c *CriManager) StopPodSandbox(ctx context.Context, r *runtime.StopPodSandb
 		}
 	}
 
-	// Tear down sandbox's network.
 	container, err := c.ContainerMgr.Get(ctx, podSandboxID)
 	if err != nil {
 		return nil, err
 	}
-	netnsPath := containerNetns(container)
-	if netnsPath == "" {
-		return nil, fmt.Errorf("failed to find network namespace path for sandbox %q", podSandboxID)
-	}
-
 	metadata, err := parseSandboxName(container.Name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse metadata of sandbox %q from container name: %v", podSandboxID, err)
 	}
 
-	err = c.CniMgr.TearDownPodNetwork(&ocicni.PodNetwork{
-		Name:      metadata.GetName(),
-		Namespace: metadata.GetNamespace(),
-		ID:        podSandboxID,
-		NetNS:     netnsPath,
-		// TODO: get portmapping configuration.
-	})
-	if err != nil {
-		return nil, err
+	securityContext := sandboxMeta.Config.GetLinux().GetSecurityContext()
+	hostNet := securityContext.GetNamespaceOptions().GetHostNetwork()
+
+	// Teardown network of the pod, if it is not in host network mode.
+	if !hostNet {
+		err = c.CniMgr.TearDownPodNetwork(&ocicni.PodNetwork{
+			Name:         metadata.GetName(),
+			Namespace:    metadata.GetNamespace(),
+			ID:           podSandboxID,
+			NetNS:        sandboxMeta.NetNSPath,
+			PortMappings: toCNIPortMappings(sandboxMeta.Config.GetPortMappings()),
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Stop the sandbox container.
@@ -255,12 +305,28 @@ func (c *CriManager) RemovePodSandbox(ctx context.Context, r *runtime.RemovePodS
 		return nil, fmt.Errorf("failed to remove sandbox %q: %v", podSandboxID, err)
 	}
 
+	// Cleanup the sandbox root directory.
+	sandboxRootDir := path.Join(c.SandboxBaseDir, podSandboxID)
+	err = os.RemoveAll(sandboxRootDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to remove root directory %q: %v", sandboxRootDir, err)
+	}
+
+	c.SandboxStore.Remove(podSandboxID)
+
 	return &runtime.RemovePodSandboxResponse{}, nil
 }
 
 // PodSandboxStatus returns the status of the PodSandbox.
 func (c *CriManager) PodSandboxStatus(ctx context.Context, r *runtime.PodSandboxStatusRequest) (*runtime.PodSandboxStatusResponse, error) {
 	podSandboxID := r.GetPodSandboxId()
+
+	res, ok := c.SandboxStore.Get(podSandboxID).Result()
+	if !ok {
+		return nil, fmt.Errorf("failed to get metadata of %q from SandboxStore", podSandboxID)
+	}
+	sandboxMeta := res.(*SandboxMeta)
+
 	sandbox, err := c.ContainerMgr.Get(ctx, podSandboxID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get status of sandbox %q: %v", podSandboxID, err)
@@ -284,13 +350,16 @@ func (c *CriManager) PodSandboxStatus(ctx context.Context, r *runtime.PodSandbox
 	}
 	labels, annotations := extractLabels(sandbox.Config.Labels)
 
-	// TODO: check if the sandbox's network is in host mode.
+	securityContext := sandboxMeta.Config.GetLinux().GetSecurityContext()
+	hostNet := securityContext.GetNamespaceOptions().GetHostNetwork()
+
 	var ip string
-	netnsPath := containerNetns(sandbox)
-	if netnsPath != "" {
-		ip, err = c.CniMgr.GetPodNetworkStatus(netnsPath)
+	// No need to get ip for host network mode.
+	if !hostNet {
+		ip, err = c.CniMgr.GetPodNetworkStatus(sandboxMeta.NetNSPath)
 		if err != nil {
-			return nil, err
+			// Maybe the pod has been stopped.
+			logrus.Warnf("failed to get ip of sandbox %q: %v", podSandboxID, err)
 		}
 	}
 
@@ -354,8 +423,8 @@ func (c *CriManager) CreateContainer(ctx context.Context, r *runtime.CreateConta
 	}
 	createConfig := &apitypes.ContainerCreateConfig{
 		ContainerConfig: apitypes.ContainerConfig{
-			// TODO: maybe we should ditinguish cmd and entrypoint more clearly.
-			Cmd:        config.Command,
+			Entrypoint: config.Command,
+			Cmd:        config.Args,
 			Env:        generateEnvList(config.GetEnvs()),
 			Image:      image,
 			WorkingDir: config.WorkingDir,
@@ -375,6 +444,10 @@ func (c *CriManager) CreateContainer(ctx context.Context, r *runtime.CreateConta
 		return nil, err
 	}
 
+	// Bindings to overwrite the container's /etc/resolv.conf, /etc/hosts etc.
+	sandboxRootDir := path.Join(c.SandboxBaseDir, podSandboxID)
+	createConfig.HostConfig.Binds = append(createConfig.HostConfig.Binds, generateContainerMounts(sandboxRootDir)...)
+
 	// TODO: devices and security option configurations.
 
 	containerName := makeContainerName(sandboxConfig, config)
@@ -384,7 +457,28 @@ func (c *CriManager) CreateContainer(ctx context.Context, r *runtime.CreateConta
 		return nil, fmt.Errorf("failed to create container for sandbox %q: %v", podSandboxID, err)
 	}
 
-	return &runtime.CreateContainerResponse{ContainerId: createResp.ID}, nil
+	containerID := createResp.ID
+
+	// Get container log.
+	if config.GetLogPath() != "" {
+		logPath := filepath.Join(sandboxConfig.GetLogDirectory(), config.GetLogPath())
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create container for opening log file failed: %v", err)
+		}
+		// Attach to the container to get log.
+		attachConfig := &AttachConfig{
+			Stdout:     true,
+			Stderr:     true,
+			CriLogFile: f,
+		}
+		err = c.ContainerMgr.Attach(context.Background(), containerID, attachConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to attach to container %q to get its log: %v", containerID, err)
+		}
+	}
+
+	return &runtime.CreateContainerResponse{ContainerId: containerID}, nil
 }
 
 // StartContainer starts the container.
@@ -593,29 +687,28 @@ func (c *CriManager) ExecSync(ctx context.Context, r *runtime.ExecSyncRequest) (
 		return nil, fmt.Errorf("failed to start exec for container %q: %v", id, err)
 	}
 
-	execInspect, err := c.ContainerMgr.InspectExec(ctx, execid)
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect exec for container %q: %v", id, err)
-	}
-
-	var result *ctrd.Message
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	select {
-	case <-ticker.C:
-		return nil, fmt.Errorf("timeout to get exec result for container %q", id)
-	case result = <-execInspect.ExitCh:
+	var execConfig *ContainerExecConfig
+	for {
+		execConfig, err = c.ContainerMgr.GetExecConfig(ctx, execid)
+		if err != nil {
+			return nil, fmt.Errorf("failed to inspect exec for container %q: %v", id, err)
+		}
+		// Loop until exec finished.
+		if !execConfig.Running {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	var stderr []byte
-	if result.RawError() != nil {
-		stderr = []byte(result.RawError().Error())
+	if execConfig.Error != nil {
+		stderr = []byte(execConfig.Error.Error())
 	}
 
 	return &runtime.ExecSyncResponse{
 		Stdout:   output.Bytes(),
 		Stderr:   stderr,
-		ExitCode: int32(result.ExitCode()),
+		ExitCode: int32(execConfig.ExitCode),
 	}, nil
 }
 
@@ -670,7 +763,12 @@ func (c *CriManager) ListImages(ctx context.Context, r *runtime.ListImagesReques
 
 	images := make([]*runtime.Image, 0, len(imageList))
 	for _, i := range imageList {
-		image, err := imageToCriImage(&i)
+		// NOTE: we should query image cache to get the correct image info.
+		imageInfo, err := c.ImageMgr.GetImage(ctx, strings.TrimPrefix(i.ID, "sha256:"))
+		if err != nil {
+			continue
+		}
+		image, err := imageToCriImage(imageInfo)
 		if err != nil {
 			// TODO: log an error message?
 			continue
@@ -689,10 +787,10 @@ func (c *CriManager) ImageStatus(ctx context.Context, r *runtime.ImageStatusRequ
 		return nil, err
 	}
 
-	imageInfo, err := c.ImageMgr.GetImage(ctx, ref.String())
+	imageInfo, err := c.ImageMgr.GetImage(ctx, strings.TrimPrefix(ref.String(), "sha256:"))
 	if err != nil {
-		// TODO: seperate ErrImageNotFound with others.
-		// Now we just return empty if the error occured.
+		// TODO: separate ErrImageNotFound with others.
+		// Now we just return empty if the error occurred.
 		return &runtime.ImageStatusResponse{}, nil
 	}
 
@@ -709,18 +807,34 @@ func (c *CriManager) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 	// TODO: authentication.
 	imageRef := r.GetImage().GetImage()
 
-	namedRef, err := reference.ParseNamedReference(imageRef)
-	if err != nil {
-		return nil, err
-	}
-	taggedRef := reference.WithDefaultTagIfMissing(namedRef).(reference.Tagged)
-
-	err = c.ImageMgr.PullImage(ctx, taggedRef.Name(), taggedRef.Tag(), nil, bytes.NewBuffer([]byte{}))
+	refNamed, err := reference.ParseNamedReference(imageRef)
 	if err != nil {
 		return nil, err
 	}
 
-	imageInfo, err := c.ImageMgr.GetImage(ctx, taggedRef.String())
+	_, ok := refNamed.(reference.Digested)
+	if !ok {
+		// If the imageRef is not a digest.
+		refTagged := reference.WithDefaultTagIfMissing(refNamed).(reference.Tagged)
+		imageRef = refTagged.String()
+	}
+
+	authConfig := &apitypes.AuthConfig{}
+	if r.Auth != nil {
+		authConfig.Auth = r.Auth.Auth
+		authConfig.Username = r.Auth.Username
+		authConfig.Password = r.Auth.Password
+		authConfig.ServerAddress = r.Auth.ServerAddress
+		authConfig.IdentityToken = r.Auth.IdentityToken
+		authConfig.RegistryToken = r.Auth.RegistryToken
+	}
+
+	err = c.ImageMgr.PullImage(ctx, imageRef, authConfig, bytes.NewBuffer([]byte{}))
+	if err != nil {
+		return nil, err
+	}
+
+	imageInfo, err := c.ImageMgr.GetImage(ctx, imageRef)
 	if err != nil {
 		return nil, err
 	}
@@ -731,19 +845,15 @@ func (c *CriManager) PullImage(ctx context.Context, r *runtime.PullImageRequest)
 // RemoveImage removes the image.
 func (c *CriManager) RemoveImage(ctx context.Context, r *runtime.RemoveImageRequest) (*runtime.RemoveImageResponse, error) {
 	imageRef := r.GetImage().GetImage()
-	ref, err := reference.Parse(imageRef)
-	if err != nil {
-		return nil, err
-	}
 
-	imageInfo, err := c.ImageMgr.GetImage(ctx, ref.String())
+	imageInfo, err := c.ImageMgr.GetImage(ctx, strings.TrimPrefix(imageRef, "sha256:"))
 	if err != nil {
-		// TODO: seperate ErrImageNotFound with others.
-		// Now we just return empty if the error occured.
+		// TODO: separate ErrImageNotFound with others.
+		// Now we just return empty if the error occurred.
 		return &runtime.RemoveImageResponse{}, nil
 	}
 
-	err = c.ImageMgr.RemoveImage(ctx, imageInfo, &ImageRemoveOption{})
+	err = c.ImageMgr.RemoveImage(ctx, imageInfo, strings.TrimPrefix(imageRef, "sha256:"), &ImageRemoveOption{})
 	if err != nil {
 		return nil, err
 	}

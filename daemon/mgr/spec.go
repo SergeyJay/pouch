@@ -10,9 +10,11 @@ import (
 type SpecWrapper struct {
 	s *specs.Spec
 
-	ctrMgr ContainerMgr
-	volMgr VolumeMgr
-	netMgr NetworkMgr
+	ctrMgr  ContainerMgr
+	volMgr  VolumeMgr
+	netMgr  NetworkMgr
+	prioArr []int
+	argsArr [][]string
 }
 
 // SetupFunc defines spec setup function type.
@@ -26,13 +28,18 @@ var setupFunc = []SetupFunc{
 	setupProcessTTY,
 	setupProcessUser,
 	setupCap,
+	setupNoNewPrivileges,
+	setupOOMScoreAdj,
 
 	// cgroup
 	setupCgroupCPUShare,
 	setupCgroupCPUSet,
+	setupCgroupCPUPeriod,
+	setupCgroupCPUQuota,
 	setupCgroupMemory,
 	setupCgroupMemorySwap,
 	setupCgroupMemorySwappiness,
+	setupDisableOOMKill,
 
 	// namespaces
 	setupUserNamespace,
@@ -55,15 +62,20 @@ var setupFunc = []SetupFunc{
 	setupAppArmor,
 	setupCapabilities,
 	setupSeccomp,
+	setupSELinux,
 
 	// blkio spec
 	setupBlkio,
+	setupDiskQuota,
 
 	// IntelRdtL3Cbm
 	setupIntelRdt,
 
 	// annotations in spec
 	setupAnnotations,
+
+	// rootfs spec
+	setupRoot,
 
 	//hook
 	setupHook,

@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/alibaba/pouch/client"
-	"github.com/alibaba/pouch/pkg/utils"
 	"github.com/alibaba/pouch/test/environment"
 )
 
@@ -71,7 +70,8 @@ func Delete(endpoint string, opts ...Option) (*http.Response, error) {
 		return nil, err
 	}
 
-	req, err := newRequest(http.MethodDelete, apiClient.BaseURL()+endpoint, opts...)
+	fullPath := apiClient.BaseURL() + apiClient.GetAPIPath(endpoint, url.Values{})
+	req, err := newRequest(http.MethodDelete, fullPath, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,8 @@ func Get(endpoint string, opts ...Option) (*http.Response, error) {
 		return nil, err
 	}
 
-	req, err := newRequest(http.MethodGet, apiClient.BaseURL()+endpoint, opts...)
+	fullPath := apiClient.BaseURL() + apiClient.GetAPIPath(endpoint, url.Values{})
+	req, err := newRequest(http.MethodGet, fullPath, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +100,8 @@ func Post(endpoint string, opts ...Option) (*http.Response, error) {
 		return nil, err
 	}
 
-	req, err := newRequest(http.MethodPost, apiClient.BaseURL()+endpoint, opts...)
+	fullPath := apiClient.BaseURL() + apiClient.GetAPIPath(endpoint, url.Values{})
+	req, err := newRequest(http.MethodPost, fullPath, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,7 @@ func Post(endpoint string, opts ...Option) (*http.Response, error) {
 // newAPIClient return new HTTP client with tls.
 //
 // FIXME: Could we make some functions exported in alibaba/pouch/client?
-func newAPIClient(host string, tls utils.TLSConfig) (*client.APIClient, error) {
+func newAPIClient(host string, tls client.TLSConfig) (*client.APIClient, error) {
 	commonAPIClient, err := client.NewAPIClient(host, tls)
 	if err != nil {
 		return nil, err
@@ -143,7 +145,13 @@ func newRequest(method, url string, opts ...Option) (*http.Request, error) {
 
 // Hijack posts hijack request.
 func Hijack(endpoint string, opts ...Option) (*http.Response, net.Conn, *bufio.Reader, error) {
-	req, err := newRequest(http.MethodPost, endpoint, opts...)
+	apiClient, err := newAPIClient(environment.PouchdAddress, environment.TLSConfig)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	fullPath := apiClient.BaseURL() + apiClient.GetAPIPath(endpoint, url.Values{})
+	req, err := newRequest(http.MethodPost, fullPath, opts...)
 	if err != nil {
 		return nil, nil, nil, err
 	}

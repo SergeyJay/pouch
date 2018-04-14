@@ -4,13 +4,15 @@ import (
 	"context"
 
 	"github.com/alibaba/pouch/apis/types"
+	"github.com/alibaba/pouch/pkg/opts"
 	"github.com/alibaba/pouch/pkg/reference"
 
 	"github.com/spf13/cobra"
 )
 
 // updateDescription is used to describe update command in detail and auto generate command doc.
-var updateDescription = ""
+var updateDescription = "Update a container's configurations, including memory, cpu and diskquota etc.  " +
+	"You can update a container when it is running."
 
 // UpdateCommand use to implement 'update' command, it modifies the configurations of a container.
 type UpdateCommand struct {
@@ -57,21 +59,21 @@ func (uc *UpdateCommand) updateRun(args []string) error {
 	container := args[0]
 	ctx := context.Background()
 
-	labels, err := parseLabels(uc.labels)
+	labels, err := opts.ParseLabels(uc.labels)
 	if err != nil {
 		return err
 	}
 
-	if err := validateMemorySwappiness(uc.memorySwappiness); err != nil {
+	if err := opts.ValidateMemorySwappiness(uc.memorySwappiness); err != nil {
 		return err
 	}
 
-	memory, err := parseMemory(uc.memory)
+	memory, err := opts.ParseMemory(uc.memory)
 	if err != nil {
 		return err
 	}
 
-	memorySwap, err := parseMemorySwap(uc.memorySwap)
+	memorySwap, err := opts.ParseMemorySwap(uc.memorySwap)
 	if err != nil {
 		return err
 	}
@@ -86,7 +88,7 @@ func (uc *UpdateCommand) updateRun(args []string) error {
 		BlkioWeight:      uc.blkioWeight,
 	}
 
-	restartPolicy, err := parseRestartPolicy(uc.restartPolicy)
+	restartPolicy, err := opts.ParseRestartPolicy(uc.restartPolicy)
 	if err != nil {
 		return err
 	}
@@ -114,5 +116,12 @@ func (uc *UpdateCommand) updateRun(args []string) error {
 
 // updateExample shows examples in update command, and is used in auto-generated cli docs.
 func updateExample() string {
-	return ``
+	return `$ pouch run -d -m 20m --name test-update registry.hub.docker.com/library/busybox:latest
+8649804cb63ff9713a2734d99728b9d6d5d1e4d2fbafb2b4dbdf79c6bbaef812
+$ cat /sys/fs/cgroup/memory/8649804cb63ff9713a2734d99728b9d6d5d1e4d2fbafb2b4dbdf79c6bbaef812/memory.limit_in_bytes
+20971520
+$ pouch update -m 30m test-update
+$ cat /sys/fs/cgroup/memory/8649804cb63ff9713a2734d99728b9d6d5d1e4d2fbafb2b4dbdf79c6bbaef812/memory.limit_in_bytes
+31457280
+	`
 }

@@ -17,6 +17,7 @@ func init() {
 // SetUpTest does common setup in the beginning of each test.
 func (suite *APIContainerListSuite) SetUpTest(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
+	PullImage(c, busyboxImage)
 }
 
 // TestListOk test api is ok with default parameters.

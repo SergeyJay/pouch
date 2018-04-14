@@ -5,11 +5,12 @@ import (
 
 	"github.com/alibaba/pouch/test/command"
 	"github.com/alibaba/pouch/test/environment"
+
 	"github.com/go-check/check"
 	"github.com/gotestyourself/gotestyourself/icmd"
 )
 
-// PouchPullSuite is the test suite fo help CLI.
+// PouchPullSuite is the test suite for pull CLI.
 type PouchPullSuite struct{}
 
 func init() {
@@ -55,6 +56,11 @@ func (suite *PouchPullSuite) TestPullWorks(c *check.C) {
 	// without registry
 	withoutRegistry := "busybox:latest"
 	checkPull(withoutRegistry, latest)
+
+	// image with namespace but without registry
+	cadvisor := "registry.hub.docker.com/google/cadvisor:latest"
+	cadvisorWithoutRegistry := "google/cadvisor:latest"
+	checkPull(cadvisorWithoutRegistry, cadvisor)
 }
 
 // TestPullInWrongWay pulls in wrong way.

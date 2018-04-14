@@ -96,6 +96,10 @@ type HostConfig struct {
 	NetworkMode string `json:"NetworkMode,omitempty"`
 
 	// An integer value containing the score given to the container in order to tune OOM killer preferences.
+	// The range is in [-1000, 1000].
+	//
+	// Maximum: 1000
+	// Minimum: -1000
 	OomScoreAdj int64 `json:"OomScoreAdj,omitempty"`
 
 	// Set the PID (Process) Namespace mode for the container. It can be either:
@@ -105,7 +109,7 @@ type HostConfig struct {
 	PidMode string `json:"PidMode,omitempty"`
 
 	// A map of exposed container ports and the host port they should map to.
-	PortBindings map[string]PortBinding `json:"PortBindings,omitempty"`
+	PortBindings PortMap `json:"PortBindings,omitempty"`
 
 	// Gives the container full access to the host.
 	Privileged bool `json:"Privileged,omitempty"`
@@ -208,7 +212,7 @@ func (m *HostConfig) UnmarshalJSON(raw []byte) error {
 
 		PidMode string `json:"PidMode,omitempty"`
 
-		PortBindings map[string]PortBinding `json:"PortBindings,omitempty"`
+		PortBindings PortMap `json:"PortBindings,omitempty"`
 
 		Privileged bool `json:"Privileged,omitempty"`
 
@@ -378,7 +382,7 @@ func (m HostConfig) MarshalJSON() ([]byte, error) {
 
 		PidMode string `json:"PidMode,omitempty"`
 
-		PortBindings map[string]PortBinding `json:"PortBindings,omitempty"`
+		PortBindings PortMap `json:"PortBindings,omitempty"`
 
 		Privileged bool `json:"Privileged,omitempty"`
 
@@ -556,7 +560,7 @@ func (m *HostConfig) Validate(formats strfmt.Registry) error {
 		res = append(res, err)
 	}
 
-	if err := m.validatePortBindings(formats); err != nil {
+	if err := m.validateOomScoreAdj(formats); err != nil {
 		res = append(res, err)
 	}
 
@@ -755,13 +759,17 @@ func (m *HostConfig) validateLogConfig(formats strfmt.Registry) error {
 	return nil
 }
 
-func (m *HostConfig) validatePortBindings(formats strfmt.Registry) error {
+func (m *HostConfig) validateOomScoreAdj(formats strfmt.Registry) error {
 
-	if swag.IsZero(m.PortBindings) { // not required
+	if swag.IsZero(m.OomScoreAdj) { // not required
 		return nil
 	}
 
-	if err := validate.Required("PortBindings", "body", m.PortBindings); err != nil {
+	if err := validate.MinimumInt("OomScoreAdj", "body", int64(m.OomScoreAdj), -1000, false); err != nil {
+		return err
+	}
+
+	if err := validate.MaximumInt("OomScoreAdj", "body", int64(m.OomScoreAdj), 1000, false); err != nil {
 		return err
 	}
 

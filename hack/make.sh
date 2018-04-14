@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -ex
 
 # This script is to build pouch binaries and execute pouch tests.
 
@@ -9,6 +9,12 @@ DIR="$( cd "$( dirname "$0" )/.." && pwd )"
 cd $DIR/
 SOURCEDIR=/go/src/github.com/alibaba/pouch
 IMAGE=pouch:test
+if [[ $SOURCEDIR != $DIR ]];then
+	[ -d $SOURCEDIR ] && rm -rf $SOURCEDIR
+	POUCHTOPDIR=$(dirname $SOURCEDIR)
+	[ ! -d $POUCHTOPDIR ] && mkdir -p $POUCHTOPDIR
+	ln -sf $DIR/ $SOURCEDIR
+fi
 
 # install pouch and essential binaries: containerd, runc and so on
 function install_pouch ()
@@ -37,9 +43,6 @@ function install_pouch ()
 			apt-get update
 			apt-get install -y lxcfs
 		fi
-
-		# MUST stop lxcfs service, so pouchd could take over it.
-		service lxcfs stop
 	else
 		sh -x $DIR/hack/install_lxcfs_on_centos.sh
 	fi
@@ -60,6 +63,13 @@ function install_pouch ()
 	fi
 }
 
+# Install dumb-init by downloading the binary.
+function install_dumb_init
+{
+    wget -O /usr/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v1.2.1/dumb-init_1.2.1_amd64 || return 1
+    chmod +x /usr/bin/dumb-init
+}
+
 function target()
 {
 	case $1 in
@@ -67,8 +77,10 @@ function target()
 		docker run --rm -v $(pwd):$SOURCEDIR $IMAGE bash -c "make check"
 		;;
 	build)
-		docker run --rm -v $(pwd):$SOURCEDIR $IMAGE bash -c "make build"  >$TMP/build.log 2>&1
-		install_pouch  >$TMP/install.log 2>&1
+		docker run --rm -v $(pwd):$SOURCEDIR $IMAGE bash -c "make build"  >$TMP/build.log ||
+		    { echo "make build log:"; cat $TMP/build.log; return 1; }
+		install_pouch  >$TMP/install.log ||
+		    { echo "install pouch log:"; cat $TMP/install.log; return 1; }
 		;;
 	unit-test)
 		docker run --rm -v $(pwd):$SOURCEDIR $IMAGE bash -c "make unit-test"
@@ -78,14 +90,9 @@ function target()
 		env PATH=$GOROOT/bin:$PATH $SOURCEDIR/hack/cri-test/test-cri.sh
 		;;
 	integration-test)
-		docker run --rm -v $(pwd):$SOURCEDIR $IMAGE bash -c "cd test && go test -c -o integration-test"
 
-		if [[ $SOURCEDIR != $DIR ]];then
-			[ -d $SOURCEDIR ] && rm -rf $SOURCEDIR
-			POUCHTOPDIR=$(dirname $SOURCEDIR)
-			[ ! -d $POUCHTOPDIR ] && mkdir -p $POUCHTOPDIR
-			ln -sf $DIR/ $SOURCEDIR
-		fi
+	    install_dumb_init || echo "Warning: dumb-init install failed! rich container related tests will be skipped"
+		docker run --rm -v $(pwd):$SOURCEDIR $IMAGE bash -c "cd test && go test -c -o integration-test"
 
 		#start pouch daemon
 		echo "start pouch daemon"
@@ -112,13 +119,13 @@ function target()
 			fi
 		done
 
-		pouch pull registry.hub.docker.com/library/busybox:latest >/dev/null
+		pouch pull registry.hub.docker.com/library/busybox:1.28 >/dev/null
 
 		echo "verify pouch version"
 		pouch version
 
 		# If test is failed, print pouch daemon log.
-		$DIR/test/integration-test -check.v || { echo "pouch daemon log:"; cat $TMP/log; return 1; } 
+		$DIR/test/integration-test -test.v -check.v || { echo "pouch daemon log:"; cat $TMP/log; return 1; } 
 		;;
 	*)
 		echo "no such target: $target"

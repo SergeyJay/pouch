@@ -3,8 +3,6 @@ package reference
 import (
 	"errors"
 	"strings"
-
-	digest "github.com/opencontainers/go-digest"
 )
 
 var (
@@ -17,10 +15,6 @@ var (
 
 // Parse parses ref into Reference.
 func Parse(ref string) (Reference, error) {
-	if _, err := digest.Parse(ref); err == nil {
-		return digestReference(ref), nil
-	}
-
 	return ParseNamedReference(ref)
 }
 
@@ -28,6 +22,16 @@ func Parse(ref string) (Reference, error) {
 func ParseNamedReference(ref string) (Named, error) {
 	if ok := regRef.MatchString(ref); !ok {
 		return nil, ErrInvalid
+	}
+
+	// if ref contains digest information
+	if loc := regDigest.FindStringIndex(ref); loc != nil {
+		name, digest := ref[:loc[0]], ref[loc[0]+1:]
+
+		return digestReference{
+			Named:  namedReference{name},
+			digest: digest,
+		}, nil
 	}
 
 	// if ref contains tag information
@@ -55,14 +59,40 @@ func WithDefaultTagIfMissing(named Named) Named {
 	return named
 }
 
-// Domain retrieves domain information.
-func Domain(named string) (string, bool) {
-	i := strings.IndexRune(named, '/')
+// Domain retrieves domain information. Domain include registry address and
+// repository namespace, like registry.hub.docker.com/library/ubuntu.
+func Domain(imageRef string) (string, bool) {
+	i := strings.LastIndexByte(imageRef, '/')
 
-	// FIXME: The domain should contain the . or :, how to handle the case
-	// which image name contains . or :?
-	if i == -1 || !strings.ContainsAny(named, ".:") {
+	// NOTE: in the following two conditions, imageRef doesn't contain domain:
+	// 1. No '/' in imageRef.
+	// 2. Apart from the name, the rest of imageRef should contain '.' or ':'.
+	if i == -1 || !strings.ContainsAny(imageRef[:i], ".:") {
 		return "", false
 	}
-	return named[:i], true
+	return imageRef[:i], true
+}
+
+// splitHostname splits HostName and RemoteName for the given reference.
+// Since we use user defined default registry, if HostName is null, we will return null.
+func splitHostname(ref string) (string, string) {
+	i := strings.IndexRune(ref, '/')
+	if i == -1 || !strings.ContainsAny(ref[:i], ".:") {
+		return "", ref
+	}
+	return ref[:i], ref[i+1:]
+}
+
+// IsNameOnly checks if only image repo name only, like busybox.
+func IsNameOnly(ref string) bool {
+	h, r := splitHostname(ref)
+	if h != "" {
+		return false
+	}
+
+	if strings.Contains(r, "/") {
+		return false
+	}
+
+	return true
 }

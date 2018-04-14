@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/alibaba/pouch/apis/types"
+	"github.com/alibaba/pouch/cli/inspect"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -30,6 +32,9 @@ func (n *NetworkCommand) Init(c *Cli) {
 		Short: "Manage pouch networks",
 		Long:  networkDescription,
 		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return fmt.Errorf("command 'pouch network %s' does not exist.\nPlease execute `pouch network --help` for more help", args[0])
+		},
 	}
 
 	c.AddCommand(n, &NetworkCreateCommand{})
@@ -252,6 +257,7 @@ var networkInspectDescription = "Inspect a network in pouchd. " +
 // NetworkInspectCommand is used to implement 'network inspect' command.
 type NetworkInspectCommand struct {
 	baseCommand
+	format string
 }
 
 // Init initializes NetworkInspectCommand command.
@@ -259,10 +265,10 @@ func (n *NetworkInspectCommand) Init(c *Cli) {
 	n.cli = c
 
 	n.cmd = &cobra.Command{
-		Use:   "inspect [OPTIONS] NAME",
-		Short: "Inspect a pouch network",
+		Use:   "inspect [OPTIONS] Network [Network...]",
+		Short: "Inspect one or more pouch networks",
 		Long:  networkInspectDescription,
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return n.runNetworkInspect(args)
 		},
@@ -275,21 +281,19 @@ func (n *NetworkInspectCommand) Init(c *Cli) {
 // addFlags adds flags for specific command.
 func (n *NetworkInspectCommand) addFlags() {
 	//TODO add flags
+	n.cmd.Flags().StringVarP(&n.format, "format", "f", "", "Format the output using the given go template")
 }
 
 // runNetworkInspect is the entry of NetworkInspectCommand command.
 func (n *NetworkInspectCommand) runNetworkInspect(args []string) error {
-	name := args[0]
-
 	ctx := context.Background()
 	apiClient := n.cli.Client()
-	resp, err := apiClient.NetworkInspect(ctx, name)
-	if err != nil {
-		return err
+
+	getRefFunc := func(ref string) (interface{}, error) {
+		return apiClient.NetworkInspect(ctx, ref)
 	}
 
-	n.cli.Print(resp)
-	return nil
+	return inspect.Inspect(os.Stdout, args, n.format, getRefFunc)
 }
 
 // networkInspectExample shows examples in network inspect command, and is used in auto-generated cli docs.

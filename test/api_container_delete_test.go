@@ -17,6 +17,7 @@ func init() {
 // SetUpTest does common setup in the beginning of each test.
 func (suite *APIContainerDeleteSuite) SetUpTest(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
+	PullImage(c, busyboxImage)
 }
 
 // TestDeleteNonExisting tests deleting a non-existing container return error.
