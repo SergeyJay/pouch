@@ -3,11 +3,12 @@ package mgr
 import (
 	"context"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/alibaba/pouch/pkg/errtypes"
-	"github.com/alibaba/pouch/volume"
-	"github.com/alibaba/pouch/volume/types"
+	"github.com/alibaba/pouch/storage/volume"
+	"github.com/alibaba/pouch/storage/volume/types"
 
 	"github.com/pkg/errors"
 )
@@ -21,7 +22,7 @@ type VolumeMgr interface {
 	Remove(ctx context.Context, name string) error
 
 	// List returns all volumes on this host.
-	List(ctx context.Context, labels map[string]string) ([]string, error)
+	List(ctx context.Context, labels map[string]string) ([]*types.Volume, error)
 
 	// Get returns the information of volume that specified name/id.
 	Get(ctx context.Context, name string) (*types.Volume, error)
@@ -43,9 +44,9 @@ type VolumeManager struct {
 
 // NewVolumeManager creates a brand new volume manager.
 func NewVolumeManager(cfg volume.Config) (*VolumeManager, error) {
-	// init voluem config
+	// init volume config
 	cfg.RemoveVolume = true
-	cfg.DefaultBackend = "local"
+	cfg.DefaultBackend = types.DefaultBackend
 
 	core, err := volume.NewCore(cfg)
 	if err != nil {
@@ -82,12 +83,26 @@ func (vm *VolumeManager) Create(ctx context.Context, name, driver string, option
 		id.Options[key] = opt
 	}
 
+	// set default volume mount path
+	if mount, ok := id.Options["mount"]; !ok || mount == "" {
+		id.Options["mount"] = path.Dir(vm.core.VolumeMetaPath)
+	}
+
 	return vm.core.CreateVolume(id)
 }
 
 // Remove is used to delete an existing volume.
 func (vm *VolumeManager) Remove(ctx context.Context, name string) error {
-	// TODO: check container use.
+	vol, err := vm.Get(ctx, name)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get volume: %s", name)
+	}
+
+	ref := vol.Option(types.OptionRef)
+	if ref != "" {
+		return errors.Wrapf(errtypes.ErrUsingbyContainers, "failed to remove volume: %s", name)
+	}
+
 	id := types.VolumeID{
 		Name: name,
 	}
@@ -96,11 +111,12 @@ func (vm *VolumeManager) Remove(ctx context.Context, name string) error {
 			return errors.Wrap(errtypes.ErrNotfound, err.Error())
 		}
 	}
+
 	return nil
 }
 
 // List returns all volumes on this host.
-func (vm *VolumeManager) List(ctx context.Context, labels map[string]string) ([]string, error) {
+func (vm *VolumeManager) List(ctx context.Context, labels map[string]string) ([]*types.Volume, error) {
 	if _, ok := labels["hostname"]; !ok {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -110,7 +126,7 @@ func (vm *VolumeManager) List(ctx context.Context, labels map[string]string) ([]
 		labels["hostname"] = hostname
 	}
 
-	return vm.core.ListVolumeName(labels)
+	return vm.core.ListVolumes(labels)
 }
 
 // Get returns the information of volume that specified name/id.
@@ -141,6 +157,26 @@ func (vm *VolumeManager) Attach(ctx context.Context, name string, options map[st
 	id := types.VolumeID{
 		Name: name,
 	}
+
+	v, err := vm.Get(ctx, name)
+	if err != nil {
+		return nil, errors.Errorf("failed to get volume: %s", name)
+	}
+
+	if options == nil {
+		options = make(map[string]string)
+	}
+
+	cid, ok := options[types.OptionRef]
+	if ok && cid != "" {
+		ref := v.Option(types.OptionRef)
+		if ref == "" {
+			options[types.OptionRef] = cid
+		} else {
+			options[types.OptionRef] = strings.Join([]string{ref, cid}, ",")
+		}
+	}
+
 	return vm.core.AttachVolume(id, options)
 }
 
@@ -149,5 +185,39 @@ func (vm *VolumeManager) Detach(ctx context.Context, name string, options map[st
 	id := types.VolumeID{
 		Name: name,
 	}
+
+	v, err := vm.Get(ctx, name)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to get volume: %s", name)
+	}
+
+	if options == nil {
+		options = make(map[string]string)
+	}
+
+	cid, ok := options[types.OptionRef]
+	if ok && cid != "" {
+		ref := v.Option(types.OptionRef)
+		if !strings.Contains(ref, cid) {
+			return v, nil
+		}
+
+		if ref != "" {
+			ids := strings.Split(ref, ",")
+			for i, id := range ids {
+				if id == cid {
+					ids = append(ids[:i], ids[i+1:]...)
+					break
+				}
+			}
+
+			if len(ids) > 0 {
+				options[types.OptionRef] = strings.Join(ids, ",")
+			} else {
+				options[types.OptionRef] = ""
+			}
+		}
+	}
+
 	return vm.core.DetachVolume(id, options)
 }

@@ -2,17 +2,20 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"os/exec"
 	"strings"
 
+	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/test/command"
 	"github.com/alibaba/pouch/test/environment"
+
 	"github.com/go-check/check"
 	"github.com/gotestyourself/gotestyourself/icmd"
 	"github.com/kr/pty"
 )
 
-// PouchStartSuite is the test suite fo help CLI.
+// PouchStartSuite is the test suite for start CLI.
 type PouchStartSuite struct{}
 
 func init() {
@@ -25,7 +28,7 @@ func (suite *PouchStartSuite) SetUpSuite(c *check.C) {
 
 	environment.PruneAllContainers(apiClient)
 
-	command.PouchRun("pull", busyboxImage).Assert(c, icmd.Success)
+	PullImage(c, busyboxImage)
 }
 
 // TearDownTest does cleanup work in the end of each test.
@@ -35,13 +38,13 @@ func (suite *PouchStartSuite) TearDownTest(c *check.C) {
 // TestStartCommand tests "pouch start" work.
 func (suite *PouchStartSuite) TestStartCommand(c *check.C) {
 	name := "start-normal"
-	command.PouchRun("create", "--name", name, busyboxImage).Assert(c, icmd.Success)
+	command.PouchRun("create", "--name", name, busyboxImage, "top").Assert(c, icmd.Success)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 
 	command.PouchRun("stop", name).Assert(c, icmd.Success)
 
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 }
 
 // TestStartInTTY tests "pouch start -i" work.
@@ -49,7 +52,7 @@ func (suite *PouchStartSuite) TestStartInTTY(c *check.C) {
 	// make echo server
 	name := "start-tty"
 	command.PouchRun("create", "--name", name, busyboxImage, "cat").Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	// start tty and redirect
 	cmd := exec.Command(environment.PouchBinary, "start", "-a", "-i", name)
@@ -90,8 +93,8 @@ func (suite *PouchStartSuite) TestStartWithEnv(c *check.C) {
 	name := "start-env"
 	env := "abc=123"
 
-	command.PouchRun("create", "--name", name, "-e", env, busyboxImage).Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	command.PouchRun("create", "--name", name, "-e", env, busyboxImage, "top").Assert(c, icmd.Success)
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 	output := command.PouchRun("exec", name, "/bin/env").Stdout()
@@ -108,7 +111,7 @@ func (suite *PouchStartSuite) TestStartWithEntrypoint(c *check.C) {
 
 	command.PouchRun("create", "--name", name, "--entrypoint", "sh", busyboxImage).Assert(c, icmd.Success)
 	command.PouchRun("start", name).Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	//TODO: check entrypoint really works
 }
@@ -118,7 +121,7 @@ func (suite *PouchStartSuite) TestStartWithWorkDir(c *check.C) {
 	name := "start-workdir"
 
 	command.PouchRun("create", "--name", name, "--entrypoint", "pwd", "-w", "/tmp", busyboxImage).Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	output := command.PouchRun("start", "-a", name).Stdout()
 	if !strings.Contains(output, "/tmp") {
@@ -151,8 +154,8 @@ func (suite *PouchStartSuite) TestStartWithHostname(c *check.C) {
 	name := "start-hostname"
 	hostname := "pouch"
 
-	command.PouchRun("create", "--name", name, "--hostname", hostname, busyboxImage).Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	command.PouchRun("create", "--name", name, "--hostname", hostname, busyboxImage, "top").Assert(c, icmd.Success)
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 	output := command.PouchRun("exec", name, "hostname").Stdout()
@@ -168,8 +171,8 @@ func (suite *PouchStartSuite) TestStartWithSysctls(c *check.C) {
 	sysctl := "net.ipv4.ip_forward=1"
 	name := "start-sysctl"
 
-	command.PouchRun("create", "--name", name, "--sysctl", sysctl, busyboxImage)
-	defer command.PouchRun("rm", "-f", name)
+	command.PouchRun("create", "--name", name, "--sysctl", sysctl, busyboxImage, "top")
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 	output := command.PouchRun("exec", name, "cat", "/proc/sys/net/ipv4/ip_forward").Stdout()
@@ -185,8 +188,8 @@ func (suite *PouchStartSuite) TestStartWithAppArmor(c *check.C) {
 	appArmor := "apparmor=unconfined"
 	name := "start-apparmor"
 
-	command.PouchRun("create", "--name", name, "--security-opt", appArmor, busyboxImage)
-	defer command.PouchRun("rm", "-f", name)
+	command.PouchRun("create", "--name", name, "--security-opt", appArmor, busyboxImage, "top")
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 
@@ -200,8 +203,8 @@ func (suite *PouchStartSuite) TestStartWithSeccomp(c *check.C) {
 	seccomp := "seccomp=unconfined"
 	name := "start-seccomp"
 
-	command.PouchRun("create", "--name", name, "--security-opt", seccomp, busyboxImage)
-	defer command.PouchRun("rm", "-f", name)
+	command.PouchRun("create", "--name", name, "--security-opt", seccomp, busyboxImage, "top")
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 
@@ -217,7 +220,7 @@ func (suite *PouchStartSuite) TestStartWithCapability(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "--cap-add", capability, busyboxImage, "brctl", "addbr", "foobar")
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 }
@@ -228,7 +231,50 @@ func (suite *PouchStartSuite) TestStartWithPrivilege(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "--privileged", busyboxImage, "brctl", "addbr", "foobar")
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
+
+	command.PouchRun("start", name).Assert(c, icmd.Success)
+}
+
+// TestStartWithAnnotation starts a container with annotation.
+func (suite *PouchStartSuite) TestStartWithAnnotation(c *check.C) {
+	name := "start-annotation"
+
+	res := command.PouchRun("create", "--name", name, "--annotation", "a=b", busyboxImage)
+	res.Assert(c, icmd.Success)
+	defer DelContainerForceMultyTime(c, name)
+
+	command.PouchRun("start", name).Assert(c, icmd.Success)
+}
+
+// TestStartWithExitCode starts a container with annotation.
+func (suite *PouchStartSuite) TestStartWithExitCode(c *check.C) {
+	name := "start-exitcode"
+
+	res := command.PouchRun("create", "--name", name, busyboxImage, "sh", "-c", "exit 101")
+	res.Assert(c, icmd.Success)
+	defer DelContainerForceMultyTime(c, name)
+
+	// test process exit code $? == 101
+	ret := command.PouchRun("start", "-a", name)
+	ret.Assert(c, icmd.Expected{ExitCode: 101})
+
+	// test container ExitCode == 101
+	output := command.PouchRun("inspect", name).Stdout()
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+	c.Assert(result[0].State.ExitCode, check.Equals, int64(101))
+}
+
+// TestStartWithUlimit starts a container with --ulimit.
+func (suite *PouchStartSuite) TestStartWithUlimit(c *check.C) {
+	name := "start-ulimit"
+
+	res := command.PouchRun("create", "--name", name, "--ulimit", "nproc=256", busyboxImage)
+	res.Assert(c, icmd.Success)
+	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/gotestyourself/gotestyourself/icmd"
 )
 
-// PouchUnpauseSuite is the test suite fo help CLI.
+// PouchUnpauseSuite is the test suite for unpause CLI.
 type PouchUnpauseSuite struct{}
 
 func init() {
@@ -19,7 +19,7 @@ func init() {
 func (suite *PouchUnpauseSuite) SetUpSuite(c *check.C) {
 	SkipIfFalse(c, environment.IsLinux)
 
-	command.PouchRun("pull", busyboxImage).Assert(c, icmd.Success)
+	PullImage(c, busyboxImage)
 }
 
 // TearDownTest does cleanup work in the end of each test.
@@ -30,11 +30,11 @@ func (suite *PouchUnpauseSuite) TearDownTest(c *check.C) {
 func (suite *PouchUnpauseSuite) TestUnpauseWorks(c *check.C) {
 	containernames := []string{"bar1", "bar2"}
 	for _, name := range containernames {
-		command.PouchRun("create", "--name", name, busyboxImage).Assert(c, icmd.Success)
+		command.PouchRun("create", "--name", name, busyboxImage, "top").Assert(c, icmd.Success)
 
 		command.PouchRun("start", name).Assert(c, icmd.Success)
 
-		defer command.PouchRun("rm", "-f", name)
+		defer DelContainerForceMultyTime(c, name)
 	}
 
 	command.PouchRun("pause", containernames[0]).Assert(c, icmd.Success)

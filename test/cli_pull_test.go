@@ -5,11 +5,12 @@ import (
 
 	"github.com/alibaba/pouch/test/command"
 	"github.com/alibaba/pouch/test/environment"
+
 	"github.com/go-check/check"
 	"github.com/gotestyourself/gotestyourself/icmd"
 )
 
-// PouchPullSuite is the test suite fo help CLI.
+// PouchPullSuite is the test suite for pull CLI.
 type PouchPullSuite struct{}
 
 func init() {
@@ -36,7 +37,7 @@ func (suite *PouchPullSuite) TestPullWorks(c *check.C) {
 			c.Fatalf("unexpected output %s: should got image %s\n", out, expected)
 		}
 
-		command.PouchRun("rmi", expected)
+		command.PouchRun("rmi", expected).Assert(c, icmd.Success)
 	}
 
 	busybox := "registry.hub.docker.com/library/busybox"
@@ -55,6 +56,18 @@ func (suite *PouchPullSuite) TestPullWorks(c *check.C) {
 	// without registry
 	withoutRegistry := "busybox:latest"
 	checkPull(withoutRegistry, latest)
+
+	// image with namespace but without registry
+	cadvisor := "registry.hub.docker.com/google/cadvisor:latest"
+	cadvisorWithoutRegistry := "google/cadvisor:latest"
+	checkPull(cadvisorWithoutRegistry, cadvisor)
+
+	// image with digest for tag 1.25
+	busybox125Digest := "sha256:29f5d56d12684887bdfa50dcd29fc31eea4aaf4ad3bec43daf19026a7ce69912"
+
+	busyboxDigest := busybox + "@" + busybox125Digest
+	busyboxDigestWithWrongTag := busybox + ":whatever" + "@" + busybox125Digest
+	checkPull(busyboxDigestWithWrongTag, busyboxDigest)
 }
 
 // TestPullInWrongWay pulls in wrong way.

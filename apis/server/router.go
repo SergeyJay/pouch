@@ -17,55 +17,78 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// versionMatcher defines to parse version url path.
+const versionMatcher = "/v{version:[0-9.]+}"
+
 func initRoute(s *Server) http.Handler {
 	r := mux.NewRouter()
+
 	// system
-	r.Path("/_ping").Methods(http.MethodGet).Handler(s.filter(s.ping))
-	r.Path("/info").Methods(http.MethodGet).Handler(s.filter(s.info))
-	r.Path("/version").Methods(http.MethodGet).Handler(s.filter(s.version))
-	r.Path("/auth").Methods(http.MethodPost).Handler(s.filter(s.auth))
+	s.addRoute(r, http.MethodGet, "/_ping", s.ping)
+	s.addRoute(r, http.MethodGet, "/info", s.info)
+	s.addRoute(r, http.MethodGet, "/version", s.version)
+	s.addRoute(r, http.MethodPost, "/auth", s.auth)
+
+	// daemon, we still list this API into system manager.
+	s.addRoute(r, http.MethodPost, "/daemon/update", s.updateDaemon)
 
 	// container
-	r.Path("/containers/create").Methods(http.MethodPost).Handler(s.filter(s.createContainer))
-	r.Path("/containers/{name:.*}/start").Methods(http.MethodPost).Handler(s.filter(s.startContainer))
-	r.Path("/containers/{name:.*}/stop").Methods(http.MethodPost).Handler(s.filter(s.stopContainer))
-	r.Path("/containers/{name:.*}/attach").Methods(http.MethodPost).Handler(s.filter(s.attachContainer))
-	r.Path("/containers/json").Methods(http.MethodGet).Handler(s.filter(s.getContainers))
-	r.Path("/containers/{name:.*}/json").Methods(http.MethodGet).Handler(s.filter(s.getContainer))
-	r.Path("/containers/{name:.*}").Methods(http.MethodDelete).Handler(s.filter(s.removeContainers))
-	r.Path("/containers/{name:.*}/exec").Methods(http.MethodPost).Handler(s.filter(s.createContainerExec))
-	r.Path("/exec/{name:.*}/start").Methods(http.MethodPost).Handler(s.filter(s.startContainerExec))
-	r.Path("/containers/{id:.*}/rename").Methods(http.MethodPost).Handler(s.filter(s.renameContainer))
-	r.Path("/containers/{name:.*}/pause").Methods(http.MethodPost).Handler(s.filter(s.pauseContainer))
-	r.Path("/containers/{name:.*}/unpause").Methods(http.MethodPost).Handler(s.filter(s.unpauseContainer))
-	r.Path("/containers/{name:.*}/update").Methods(http.MethodPost).Handler(s.filter(s.updateContainer))
+	s.addRoute(r, http.MethodPost, "/containers/create", s.createContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/start", s.startContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/stop", s.stopContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/attach", s.attachContainer)
+	s.addRoute(r, http.MethodGet, "/containers/json", s.getContainers)
+	s.addRoute(r, http.MethodGet, "/containers/{name:.*}/json", s.getContainer)
+	s.addRoute(r, http.MethodDelete, "/containers/{name:.*}", s.removeContainers)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/exec", s.createContainerExec)
+	s.addRoute(r, http.MethodGet, "/exec/{name:.*}/json", s.getExecInfo)
+	s.addRoute(r, http.MethodPost, "/exec/{name:.*}/start", s.startContainerExec)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/rename", s.renameContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/restart", s.restartContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/pause", s.pauseContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/unpause", s.unpauseContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/update", s.updateContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/upgrade", s.upgradeContainer)
+	s.addRoute(r, http.MethodGet, "/containers/{name:.*}/top", s.topContainer)
+	s.addRoute(r, http.MethodGet, "/containers/{name:.*}/logs", s.logsContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/resize", s.resizeContainer)
+	s.addRoute(r, http.MethodPost, "/containers/{name:.*}/restart", s.restartContainer)
 
 	// image
-	r.Path("/images/create").Methods(http.MethodPost).Handler(s.filter(s.pullImage))
-	r.Path("/images/search").Methods(http.MethodGet).Handler(s.filter(s.searchImages))
-	r.Path("/images/json").Methods(http.MethodGet).Handler(s.filter(s.listImages))
-	r.Path("/images/{name:.*}").Methods(http.MethodDelete).Handler(s.filter(s.removeImage))
-	r.Path("/images/{name:.*}/json").Methods(http.MethodGet).Handler(s.filter(s.getImage))
+	s.addRoute(r, http.MethodPost, "/images/create", s.pullImage)
+	s.addRoute(r, http.MethodPost, "/images/search", s.searchImages)
+	s.addRoute(r, http.MethodGet, "/images/json", s.listImages)
+	s.addRoute(r, http.MethodDelete, "/images/{name:.*}", s.removeImage)
+	s.addRoute(r, http.MethodGet, "/images/{name:.*}/json", s.getImage)
 
 	// volume
-	r.Path("/volumes").Methods(http.MethodGet).Handler(s.filter(s.listVolume))
-	r.Path("/volumes/create").Methods(http.MethodPost).Handler(s.filter(s.createVolume))
-	r.Path("/volumes/{name:.*}").Methods(http.MethodGet).Handler(s.filter(s.getVolume))
-	r.Path("/volumes/{name:.*}").Methods(http.MethodDelete).Handler(s.filter(s.removeVolume))
-
-	// metrics
-	r.Path("/metrics").Methods(http.MethodGet).Handler(prometheus.Handler())
+	s.addRoute(r, http.MethodGet, "/volumes", s.listVolume)
+	s.addRoute(r, http.MethodPost, "/volumes/create", s.createVolume)
+	s.addRoute(r, http.MethodGet, "/volumes/{name:.*}", s.getVolume)
+	s.addRoute(r, http.MethodDelete, "/volumes/{name:.*}", s.removeVolume)
 
 	// network
-	r.Path("/networks").Methods(http.MethodGet).Handler(s.filter(s.listNetwork))
-	r.Path("/networks/create").Methods(http.MethodPost).Handler(s.filter(s.createNetwork))
-	r.Path("/networks/{name:.*}").Methods(http.MethodGet).Handler(s.filter(s.getNetwork))
-	r.Path("/networks/{name:.*}").Methods(http.MethodDelete).Handler(s.filter(s.deleteNetwork))
 
-	if s.Config.Debug {
+	s.addRoute(r, http.MethodGet, "/networks", s.listNetwork)
+	s.addRoute(r, http.MethodPost, "/networks/create", s.createNetwork)
+	s.addRoute(r, http.MethodGet, "/networks/{id:.*}", s.getNetwork)
+	s.addRoute(r, http.MethodDelete, "/networks/{id:.*}", s.deleteNetwork)
+	s.addRoute(r, http.MethodPost, "/networks/{id:.*}/connect", s.connectToNetwork)
+	s.addRoute(r, http.MethodPost, "/networks/{id:.*}/disconnect", s.disconnectNetwork)
+
+	// metrics
+	r.Path(versionMatcher + "/metrics").Methods(http.MethodGet).Handler(prometheus.Handler())
+	r.Path("/metrics").Methods(http.MethodGet).Handler(prometheus.Handler())
+
+	if s.Config.Debug || s.Config.EnableProfiler {
 		profilerSetup(r)
 	}
 	return r
+}
+
+func (s *Server) addRoute(r *mux.Router, mothod string, path string, f func(ctx context.Context, rw http.ResponseWriter, req *http.Request) error) {
+	r.Path(versionMatcher + path).Methods(mothod).Handler(filter(f, s))
+	r.Path(path).Methods(mothod).Handler(filter(f, s))
 }
 
 func profilerSetup(mainRouter *mux.Router) {
@@ -83,12 +106,23 @@ func profilerSetup(mainRouter *mux.Router) {
 
 type handler func(context.Context, http.ResponseWriter, *http.Request) error
 
-func (s *Server) filter(handler handler) http.HandlerFunc {
+func filter(handler handler, s *Server) http.HandlerFunc {
 	pctx := context.Background()
 
 	return func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := context.WithCancel(pctx)
 		defer cancel()
+
+		s.lock.RLock()
+		if len(s.ManagerWhiteList) > 0 && req.TLS != nil && len(req.TLS.PeerCertificates) > 0 {
+			if _, isManager := s.ManagerWhiteList[req.TLS.PeerCertificates[0].Subject.CommonName]; !isManager {
+				s.lock.RUnlock()
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte("tls verified error."))
+				return
+			}
+		}
+		s.lock.RUnlock()
 
 		t := time.Now()
 		clientInfo := req.RemoteAddr

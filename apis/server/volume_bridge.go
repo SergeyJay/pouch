@@ -8,6 +8,7 @@ import (
 	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/pkg/httputils"
 	"github.com/alibaba/pouch/pkg/randomid"
+	volumetypes "github.com/alibaba/pouch/storage/volume/types"
 
 	"github.com/go-openapi/strfmt"
 	"github.com/gorilla/mux"
@@ -34,7 +35,7 @@ func (s *Server) createVolume(ctx context.Context, rw http.ResponseWriter, req *
 	}
 
 	if driver == "" {
-		driver = "local"
+		driver = volumetypes.DefaultBackend
 	}
 
 	if err := s.VolumeMgr.Create(ctx, name, driver, options, labels); err != nil {
@@ -78,7 +79,7 @@ func (s *Server) getVolume(ctx context.Context, rw http.ResponseWriter, req *htt
 		Name:       volume.Name,
 		Driver:     volume.Driver(),
 		Mountpoint: volume.Path(),
-		CreatedAt:  volume.CreationTimestamp.Format("2006-1-2 15:04:05"),
+		CreatedAt:  volume.CreateTime(),
 		Labels:     volume.Labels,
 	}
 
@@ -113,8 +114,27 @@ func (s *Server) listVolume(ctx context.Context, rw http.ResponseWriter, req *ht
 	}
 
 	respVolumes := types.VolumeListResp{Volumes: []*types.VolumeInfo{}, Warnings: nil}
-	for _, name := range volumes {
-		respVolumes.Volumes = append(respVolumes.Volumes, &types.VolumeInfo{Name: name})
+	for _, volume := range volumes {
+		respVolume := &types.VolumeInfo{
+			Name:       volume.Name,
+			Driver:     volume.Driver(),
+			Mountpoint: volume.Path(),
+			CreatedAt:  volume.CreateTime(),
+			Labels:     volume.Labels,
+		}
+
+		var status map[string]interface{}
+		for k, v := range volume.Options() {
+			if k != "" && v != "" {
+				if status == nil {
+					status = make(map[string]interface{})
+				}
+				status[k] = v
+			}
+		}
+		respVolume.Status = status
+
+		respVolumes.Volumes = append(respVolumes.Volumes, respVolume)
 	}
 	return EncodeResponse(rw, http.StatusOK, respVolumes)
 }

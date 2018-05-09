@@ -83,6 +83,29 @@ paths:
           description: "Authentication to check"
           schema:
             $ref: "#/definitions/AuthConfig"
+  
+  /daemon/update:
+    post:
+      summary: "Update daemon's labels and image proxy"
+      consumes:
+        - "application/json"
+      produces:
+        - "application/json"
+      responses:
+        200:
+          description: "no error"
+        400:
+          description: "bad parameter"
+          schema:
+            $ref: '#/definitions/Error'
+        500:
+          $ref: "#/responses/500ErrorResponse"
+      parameters:
+        - name: "DaemonUpdateConfig"
+          in: body
+          description: "Config used to update daemon, only labels and image proxy are allowed."
+          schema:
+            $ref: "#/definitions/DaemonUpdateConfig"
 
   /images/create:
     post:
@@ -382,6 +405,30 @@ paths:
           $ref: "#/responses/500ErrorResponse"
       tags: ["Container"]
 
+  /containers/{id}/restart:
+    post:
+      summary: "Restart a container"
+      operationId: "ContainerRestart"
+      parameters:
+        - $ref: "#/parameters/id"
+        - name: "name"
+          in: "query"
+          required: true
+          description: "New name for the container"
+          type: "string"
+        - name: "t"
+          in: "query"
+          description: "Number of seconds to wait before killing the container"
+          type: "integer"
+      responses:
+        204:
+          description: "no error"
+        404:
+          $ref: "#/responses/404ErrorResponse"
+        500:
+          $ref: "#/responses/500ErrorResponse"
+      tags: ["Container"]
+
   /containers/{id}/start:
     post:
       summary: "Start a container"
@@ -450,6 +497,27 @@ paths:
           $ref: "#/responses/500ErrorResponse"
       tags: ["Container"]
 
+  /containers/{id}/top:
+    post:
+      summary: "Display the running processes of a container"
+      operationId: "ContainerTop"
+      parameters:
+        - $ref: "#/parameters/id"
+        - name: "ps_args"
+          in: "query"
+          description: "top arguments"
+          type: "string"
+      responses:
+        200:
+          description: "no error"
+          schema:
+            $ref: "#/definitions/ContainerProcessList"
+        404:
+          $ref: "#/responses/404ErrorResponse"
+        500:
+          $ref: "#/responses/500ErrorResponse"
+      tags: ["Container"]
+
   /containers/{id}:
     delete:
       summary: "Remove one container"
@@ -500,6 +568,95 @@ paths:
           required: true
       tags: ["Exec"]
 
+  /containers/{id}/logs:
+    get:
+      summary: "Get container logs"
+      description: |
+        Get `stdout` and `stderr` logs from a container.
+
+        Note: This endpoint works only for containers with the `json-file` or `journald` logging driver.
+      operationId: "ContainerLogs"
+      responses:
+        101:
+          description: "logs returned as a stream"
+          schema:
+            type: "string"
+            format: "binary"
+        200:
+          description: "logs returned as a string in response body"
+          schema:
+            type: "string"
+        404:
+          $ref: "#/responses/404ErrorResponse"
+        500:
+          $ref: "#/responses/500ErrorResponse"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          description: "ID or name of the container"
+          type: "string"
+        - name: "follow"
+          in: "query"
+          description: |
+            Return the logs as a stream.
+          type: "boolean"
+          default: false
+        - name: "stdout"
+          in: "query"
+          description: "Return logs from `stdout`"
+          type: "boolean"
+          default: false
+        - name: "stderr"
+          in: "query"
+          description: "Return logs from `stderr`"
+          type: "boolean"
+          default: false
+        - name: "since"
+          in: "query"
+          description: "Only return logs since this time, as a UNIX timestamp"
+          type: "integer"
+          default: 0
+        - name: "until"
+          in: "query"
+          description: "Only return logs before this time, as a UNIX timestamp"
+          type: "integer"
+          default: 0
+        - name: "timestamps"
+          in: "query"
+          description: "Add timestamps to every log line"
+          type: "boolean"
+          default: false
+        - name: "tail"
+          in: "query"
+          description: "Only return this number of log lines from the end of the logs. Specify as an integer or `all` to output all log lines."
+          type: "string"
+          default: "all"
+      tags: ["Container"]
+
+  /containers/{id}/resize:
+    post:
+      summary: "changes the size of the tty for a container"
+      operationId: "ContainerResize"
+      parameters:
+        - $ref: "#/parameters/id"
+        - name: "height"
+          in: "query"
+          description: "height of the tty"
+          type: "string"
+        - name: "width"
+          in: "query"
+          description: "width of the tty"
+          type: "string"
+      responses:
+        200:
+          description: "no error"
+        400:
+          description: "bad parameter"
+          schema:
+            $ref: "#/definitions/Error"
+      tags: ["Container"]
+
   /exec/{id}/start:
     post:
       summary: "Start an exec instance"
@@ -532,6 +689,34 @@ paths:
           type: "string"
       tags: ["Exec"]
 
+  /exec/{id}/json:
+    get:
+      summary: "Inspect an exec instance"
+      description: "Return low-level information about an exec instance."
+      operationId: "ExecInspect"
+      produces:
+        - "application/json"
+      responses:
+        200:
+          description: "No error"
+          schema:
+            $ref: "#/definitions/ContainerExecInspect"
+        404:
+          description: "No such exec instance"
+          schema:
+            $ref: "#/responses/404ErrorResponse"
+        500:
+          description: "Server error"
+          schema:
+            $ref: "#/responses/500ErrorResponse"
+      parameters:
+        - name: "id"
+          in: "path"
+          description: "Exec instance ID"
+          required: true
+          type: "string"
+      tags: ["Exec"]
+
   /containers/{id}/attach:
     post:
       summary: "Attach to a container"
@@ -555,7 +740,7 @@ paths:
 
         After the headers and two new lines, the TCP connection can now be used for raw, bidirectional communication between the client and server.
 
-        To hint potential proxies about connection hijacking, the Docker client can also optionally send connection upgrade headers.
+        To hint potential proxies about connection hijacking, the Pouch client can also optionally send connection upgrade headers.
 
         For example, the client sends this request to upgrade the connection:
 
@@ -565,7 +750,7 @@ paths:
         Connection: Upgrade
         ```
 
-        The Docker daemon will respond with a `101 UPGRADED` response, and will similarly follow with the raw stream:
+        The Pouch daemon will respond with a `101 UPGRADED` response, and will similarly follow with the raw stream:
 
         ```
         HTTP/1.1 101 UPGRADED
@@ -696,6 +881,28 @@ paths:
         500:
           $ref: "#/responses/500ErrorResponse"
       tags: ["Container"]
+  /containers/{id}/upgrade:
+      post:
+        summary: "Upgrade a container with new image and args"
+        operationId: "ContainerUpgrade"
+        parameters:
+          - $ref: "#/parameters/id"
+          - name: "upgradeConfig"
+            in: "body"
+            schema:
+              $ref: "#/definitions/ContainerUpgradeConfig"
+        responses:
+          200:
+            description: "no error"
+          400:
+            description: "bad parameter"
+            schema:
+              $ref: "#/definitions/Error"
+          404:
+            $ref: "#/responses/404ErrorResponse"
+          500:
+            $ref: "#/responses/500ErrorResponse"
+        tags: ["Container"]
 
   /volumes:
     get:
@@ -874,10 +1081,79 @@ paths:
           200:
             description: "Summary networks that matches the query"
             schema:
-                $ref: "#/definitions/NetworkListResp"
+                $ref: "#/definitions/NetworkResource"
           500:
             $ref: "#/responses/500ErrorResponse"
         tags: ["Network"]
+
+  /networks/{id}/connect:
+    post:
+      summary: "Connect a container to a network"
+      operationId: "NetworkConnect"
+      consumes:
+        - "application/json"
+      responses:
+        200:
+          description: "No error"
+        400:
+          description: "bad parameter"
+          schema:
+            $ref: "#/definitions/Error"
+        404:
+          description: "Network or container not found"
+          schema:
+            $ref: "#/responses/404ErrorResponse"
+        500:
+          description: "Server error"
+          schema:
+            $ref: "#/responses/500ErrorResponse"
+      parameters:
+        - name: "id"
+          in: "path"
+          description: "Network ID or name"
+          required: true
+          type: "string"
+        - name: "container"
+          in: "body"
+          required: true
+          schema:
+            $ref: "#/definitions/NetworkConnect"
+      tags: ["Network"]
+
+  /networks/{id}/disconnect:
+    post:
+      summary: "Disconnect a container from a network"
+      operationId: "NetworkDisconnect"
+      consumes:
+        - "application/json"
+      responses:
+        200:
+          description: "No error"
+        400:
+          description: "bad parameter"
+          schema:
+            $ref: "#/definitions/Error"
+        404:
+          description: "Network or container not found"
+          schema:
+            $ref: "#/responses/404ErrorResponse"
+        500:
+          description: "Server error"
+          schema:
+            $ref: "#/responses/500ErrorResponse"
+      parameters:
+        - name: "id"
+          in: "path"
+          description: "Network ID or name"
+          required: true
+          type: "string"
+        - name: "NetworkDisconnect"
+          in: "body"
+          required: true
+          description: "Network disconnect parameters"
+          schema:
+            $ref: "#/definitions/NetworkDisconnect"
+      tags: ["Network"]
 
 definitions:
   Error:
@@ -925,16 +1201,475 @@ definitions:
   SystemInfo:
     type: "object"
     properties:
-      Architecture:
+      ID:
+        description: |
+          Unique identifier of the daemon.
+
+          <p><br /></p>
+
+          > **Note**: The format of the ID itself is not part of the API, and
+          > should not be considered stable.
         type: "string"
+        example: "7TRN:IPZB:QYBB:VPBQ:UMPP:KARE:6ZNR:XE6T:7EWV:PKF4:ZOJD:TPYS"
       Containers:
+        description: "Total number of containers on the host."
         type: "integer"
+        example: 14
       ContainersRunning:
+        description: |
+          Number of containers with status `"running"`.
         type: "integer"
-      ContainersStopped:
-        type: "integer"
+        example: 3
       ContainersPaused:
+        description: |
+          Number of containers with status `"paused"`.
         type: "integer"
+        example: 1
+      ContainersStopped:
+        description: |
+          Number of containers with status `"stopped"`.
+        type: "integer"
+        example: 10
+      Images:
+        description: |
+          Total number of images on the host.
+
+          Both _tagged_ and _untagged_ (dangling) images are counted.
+        type: "integer"
+        example: 508
+      Driver:
+        description: "Name of the storage driver in use."
+        type: "string"
+        example: "overlay2"
+      DriverStatus:
+        description: |
+          Information specific to the storage driver, provided as
+          "label" / "value" pairs.
+
+          This information is provided by the storage driver, and formatted
+          in a way consistent with the output of `pouch info` on the command
+          line.
+
+          <p><br /></p>
+
+          > **Note**: The information returned in this field, including the
+          > formatting of values and labels, should not be considered stable,
+          > and may change without notice.
+        type: "array"
+        items:
+          type: "array"
+          items:
+            type: "string"
+        example:
+          - ["Backing Filesystem", "extfs"]
+          - ["Supports d_type", "true"]
+          - ["Native Overlay Diff", "true"]
+      PouchRootDir:
+        description: |
+          Root directory of persistent Pouch state.
+
+          Defaults to `/var/lib/pouch` on Linux.
+        type: "string"
+        example: "/var/lib/pouch"
+      Debug:
+        description: "Indicates if the daemon is running in debug-mode / with debug-level logging enabled."
+        type: "boolean"
+        example: true
+      LoggingDriver:
+        description: |
+          The logging driver to use as a default for new containers.
+        type: "string"
+      CgroupDriver:
+        description: |
+          The driver to use for managing cgroups.
+        type: "string"
+        x-nullable: false
+        enum: ["cgroupfs", "systemd"]
+        default: "cgroupfs"
+        example: "cgroupfs"
+      KernelVersion:
+        description: |
+          Kernel version of the host.
+          On Linux, this information obtained from `uname`.
+        type: "string"
+      OperatingSystem:
+        description: |
+          Name of the host's operating system, for example: "Ubuntu 16.04.2 LTS".
+        type: "string"
+        example: "Alpine Linux v3.5"
+      OSType:
+        description: |
+          Generic type of the operating system of the host, as returned by the
+          Go runtime (`GOOS`).
+
+          Currently returned value is "linux". A full list of
+          possible values can be found in the [Go documentation](https://golang.org/doc/install/source#environment).
+        type: "string"
+        example: "linux"
+      Architecture:
+        description: |
+          Hardware architecture of the host, as returned by the Go runtime
+          (`GOARCH`).
+
+          A full list of possible values can be found in the [Go documentation](https://golang.org/doc/install/source#environment).
+        type: "string"
+        example: "x86_64"
+      NCPU:
+        description: |
+          The number of logical CPUs usable by the daemon.
+
+          The number of available CPUs is checked by querying the operating
+          system when the daemon starts. Changes to operating system CPU
+          allocation after the daemon is started are not reflected.
+        type: "integer"
+        example: 4
+      MemTotal:
+        description: |
+          Total amount of physical memory available on the host, in kilobytes (kB).
+        type: "integer"
+        format: "int64"
+        example: 2095882240
+
+      IndexServerAddress:
+        description: |
+          Address / URL of the index server that is used for image search,
+          and as a default for user authentication.
+        type: "string"
+      DefaultRegistry:
+        description: |
+          default registry can be defined by user.
+        type: "string"
+      RegistryConfig:
+        $ref: "#/definitions/RegistryServiceConfig"
+      HttpProxy:
+        description: |
+          HTTP-proxy configured for the daemon. This value is obtained from the
+          [`HTTP_PROXY`](https://www.gnu.org/software/wget/manual/html_node/Proxies.html) environment variable.
+
+          Containers do not automatically inherit this configuration.
+        type: "string"
+        example: "http://user:pass@proxy.corp.example.com:8080"
+      HttpsProxy:
+        description: |
+          HTTPS-proxy configured for the daemon. This value is obtained from the
+          [`HTTPS_PROXY`](https://www.gnu.org/software/wget/manual/html_node/Proxies.html) environment variable.
+
+          Containers do not automatically inherit this configuration.
+        type: "string"
+        example: "https://user:pass@proxy.corp.example.com:4443"
+      Name:
+        description: "Hostname of the host."
+        type: "string"
+        example: "node5.corp.example.com"
+      Labels:
+        description: |
+          User-defined labels (key/value metadata) as set on the daemon.
+        type: "array"
+        items:
+          type: "string"
+        example: ["storage=ssd", "production"]
+      ExperimentalBuild:
+        description: |
+          Indicates if experimental features are enabled on the daemon.
+        type: "boolean"
+        example: true
+      ServerVersion:
+        description: |
+          Version string of the daemon.
+        type: "string"
+        example: "17.06.0-ce"
+      Runtimes:
+        description: |
+          List of [OCI compliant](https://github.com/opencontainers/runtime-spec)
+          runtimes configured on the daemon. Keys hold the "name" used to
+          reference the runtime.
+
+          The Pouch daemon relies on an OCI compliant runtime (invoked via the
+          `containerd` daemon) as its interface to the Linux kernel namespaces,
+          cgroups, and SELinux.
+
+          The default runtime is `runc`, and automatically configured. Additional
+          runtimes can be configured by the user and will be listed here.
+        type: "object"
+        additionalProperties:
+          $ref: "#/definitions/Runtime"
+        default:
+          runc:
+            path: "pouch-runc"
+        example:
+          runc:
+            path: "pouch-runc"
+          runc-master:
+            path: "/go/bin/runc"
+          custom:
+            path: "/usr/local/bin/my-oci-runtime"
+            runtimeArgs: ["--debug", "--systemd-cgroup=false"]
+      DefaultRuntime:
+        description: |
+          Name of the default OCI runtime that is used when starting containers.
+          The default can be overridden per-container at create time.
+        type: "string"
+        x-nullable: false
+        default: "runc"
+        example: "runc"
+      LiveRestoreEnabled:
+        description: |
+          Indicates if live restore is enabled.
+          If enabled, containers are kept running when the daemon is shutdown
+          or upon daemon start if running containers are detected.
+        type: "boolean"
+        x-nullable: false
+        default: false
+        example: false
+      LxcfsEnabled:
+        description: |
+          Indicates if lxcfs is enabled.
+        type: "boolean"
+        x-nullable: false
+        default: false
+        example: false
+      ContainerdCommit:
+        $ref: "#/definitions/Commit"
+      RuncCommit:
+        $ref: "#/definitions/Commit"
+      SecurityOptions:
+        description: |
+          List of security features that are enabled on the daemon, such as
+          apparmor, seccomp, SELinux, and user-namespaces (userns).
+
+          Additional configuration options for each security feature may
+          be present, and are included as a comma-separated list of key/value
+          pairs.
+        type: "array"
+        items:
+          type: "string"
+        example:
+          - "name=apparmor"
+          - "name=seccomp,profile=default"
+          - "name=selinux"
+          - "name=userns"
+      ListenAddresses:
+        description: "List of addresses the pouchd listens on"
+        type: "array"
+        items:
+          type: "string"
+        example:
+          - ["unix:///var/run/pouchd.sock", "tcp://0.0.0.0:4243"]
+
+  DaemonUpdateConfig:
+    type: "object"
+    properties:
+      Labels:
+        description: "Labels indentified the attributes of daemon"
+        type: "array"
+        items:
+          type: "string"
+        example: ["storage=ssd", "zone=hangzhou"]
+      ImageProxy:
+        description: "Image proxy used to pull image."
+        type: "string"
+
+  RegistryServiceConfig:
+    description: |
+      RegistryServiceConfig stores daemon registry services configuration.
+    type: "object"
+    x-nullable: true
+    properties:
+      AllowNondistributableArtifactsCIDRs:
+        description: |
+          List of IP ranges to which nondistributable artifacts can be pushed,
+          using the CIDR syntax [RFC 4632](https://tools.ietf.org/html/4632).
+
+          Some images contain artifacts whose distribution is restricted by license.
+          When these images are pushed to a registry, restricted artifacts are not
+          included.
+
+          This configuration override this behavior, and enables the daemon to
+          push nondistributable artifacts to all registries whose resolved IP
+          address is within the subnet described by the CIDR syntax.
+
+          This option is useful when pushing images containing
+          nondistributable artifacts to a registry on an air-gapped network so
+          hosts on that network can pull the images without connecting to
+          another server.
+
+          > **Warning**: Nondistributable artifacts typically have restrictions
+          > on how and where they can be distributed and shared. Only use this
+          > feature to push artifacts to private registries and ensure that you
+          > are in compliance with any terms that cover redistributing
+          > nondistributable artifacts.
+
+        type: "array"
+        items:
+          type: "string"
+        example: ["::1/128", "127.0.0.0/8"]
+      AllowNondistributableArtifactsHostnames:
+        description: |
+          List of registry hostnames to which nondistributable artifacts can be
+          pushed, using the format `<hostname>[:<port>]` or `<IP address>[:<port>]`.
+
+          Some images (for example, Windows base images) contain artifacts
+          whose distribution is restricted by license. When these images are
+          pushed to a registry, restricted artifacts are not included.
+
+          This configuration override this behavior for the specified
+          registries.
+
+          This option is useful when pushing images containing
+          nondistributable artifacts to a registry on an air-gapped network so
+          hosts on that network can pull the images without connecting to
+          another server.
+
+          > **Warning**: Nondistributable artifacts typically have restrictions
+          > on how and where they can be distributed and shared. Only use this
+          > feature to push artifacts to private registries and ensure that you
+          > are in compliance with any terms that cover redistributing
+          > nondistributable artifacts.
+        type: "array"
+        items:
+          type: "string"
+        example: ["registry.internal.corp.example.com:3000", "[2001:db8:a0b:12f0::1]:443"]
+      InsecureRegistryCIDRs:
+        description: |
+          List of IP ranges of insecure registries, using the CIDR syntax
+          ([RFC 4632](https://tools.ietf.org/html/4632)). Insecure registries
+          accept un-encrypted (HTTP) and/or untrusted (HTTPS with certificates
+          from unknown CAs) communication.
+
+          By default, local registries (`127.0.0.0/8`) are configured as
+          insecure. All other registries are secure. Communicating with an
+          insecure registry is not possible if the daemon assumes that registry
+          is secure.
+
+          This configuration override this behavior, insecure communication with
+          registries whose resolved IP address is within the subnet described by
+          the CIDR syntax.
+
+          Registries can also be marked insecure by hostname. Those registries
+          are listed under `IndexConfigs` and have their `Secure` field set to
+          `false`.
+
+          > **Warning**: Using this option can be useful when running a local
+          > registry, but introduces security vulnerabilities. This option
+          > should therefore ONLY be used for testing purposes. For increased
+          > security, users should add their CA to their system's list of trusted
+          > CAs instead of enabling this option.
+        type: "array"
+        items:
+          type: "string"
+        example: ["::1/128", "127.0.0.0/8"]
+      IndexConfigs:
+        type: "object"
+        additionalProperties:
+          $ref: "#/definitions/IndexInfo"
+        example:
+          "127.0.0.1:5000":
+            "Name": "127.0.0.1:5000"
+            "Mirrors": []
+            "Secure": false
+            "Official": false
+          "[2001:db8:a0b:12f0::1]:80":
+            "Name": "[2001:db8:a0b:12f0::1]:80"
+            "Mirrors": []
+            "Secure": false
+            "Official": false
+          "registry.internal.corp.example.com:3000":
+            Name: "registry.internal.corp.example.com:3000"
+            Mirrors: []
+            Secure: false
+            Official: false
+      Mirrors:
+        description: "List of registry URLs that act as a mirror for the official registry."
+        type: "array"
+        items:
+          type: "string"
+        example:
+          - "https://hub-mirror.corp.example.com:5000/"
+          - "https://[2001:db8:a0b:12f0::1]/"
+
+  IndexInfo:
+    description:
+      IndexInfo contains information about a registry.
+    type: "object"
+    x-nullable: true
+    properties:
+      Name:
+        description: |
+          Name of the registry.
+        type: "string"
+      Mirrors:
+        description: |
+          List of mirrors, expressed as URIs.
+        type: "array"
+        items:
+          type: "string"
+        example:
+          - "https://hub-mirror.corp.example.com:5000/"
+      Secure:
+        description: |
+          Indicates if the the registry is part of the list of insecure
+          registries.
+
+          If `false`, the registry is insecure. Insecure registries accept
+          un-encrypted (HTTP) and/or untrusted (HTTPS with certificates from
+          unknown CAs) communication.
+
+          > **Warning**: Insecure registries can be useful when running a local
+          > registry. However, because its use creates security vulnerabilities
+          > it should ONLY be enabled for testing purposes. For increased
+          > security, users should add their CA to their system's list of
+          > trusted CAs instead of enabling this option.
+        type: "boolean"
+        example: true
+      Official:
+        description: |
+          Indicates whether this is an official registry.
+        type: "boolean"
+        example: true
+
+  Runtime:
+    description: |
+      Runtime describes an [OCI compliant](https://github.com/opencontainers/runtime-spec)
+      runtime.
+
+      The runtime is invoked by the daemon via the `containerd` daemon. OCI
+      runtimes act as an interface to the Linux kernel namespaces, cgroups,
+      and SELinux.
+    type: "object"
+    properties:
+      path:
+        description: |
+          Name and, optional, path, of the OCI executable binary.
+
+          If the path is omitted, the daemon searches the host's `$PATH` for the
+          binary and uses the first result.
+        type: "string"
+        example: "/usr/local/bin/my-oci-runtime"
+      runtimeArgs:
+        description: |
+          List of command-line arguments to pass to the runtime when invoked.
+        type: "array"
+        x-nullable: true
+        items:
+          type: "string"
+        example: ["--debug", "--systemd-cgroup=false"]
+
+  Commit:
+    description: |
+      Commit holds the Git-commit (SHA1) that a binary was built from, as
+      reported in the version-string of external tools, such as `containerd`,
+      or `runC`.
+    type: "object"
+    properties:
+      ID:
+        description: "Actual commit ID of external tool."
+        type: "string"
+        example: "cfb82a876ecc11b5ca0977d1733adbe58599088a"
+      Expected:
+        description: |
+          Commit ID of external tool expected by pouchd as set at build time.
+        type: "string"
+        example: "2d41c047c83e09a6d61d464906feb2a2f3c52aa4"
 
   AuthConfig:
     type: "object"
@@ -1066,7 +1801,7 @@ definitions:
       Entrypoint:
         description: |
           The entry point for the container as a string or an array of strings.
-          If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default (i.e., the entry point used by pouch when there is no `ENTRYPOINT` instruction in the `Dockerfile`).
+          If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default.
         type: "array"
         items:
           type: "string"
@@ -1077,7 +1812,7 @@ definitions:
         description: "MAC address of the container."
         type: "string"
       OnBuild:
-        description: "`ONBUILD` metadata that were defined in the image's `Dockerfile`."
+        description: "`ONBUILD` metadata that were defined."
         type: "array"
         items:
           type: "string"
@@ -1113,7 +1848,21 @@ definitions:
           - "systemd"
       InitScript:
         type: "string"
-        description: "Initial script executed in container. The script will be executed before entrypoint or command"        
+        description: "Initial script executed in container. The script will be executed before entrypoint or command"
+      DiskQuota:
+        type: "object"
+        description: "Set disk quota for container"
+        x-nullable: true
+        additionalProperties:
+          type: "string"
+      SpecAnnotation:
+        description: "annotations send to runtime spec."
+        type: "object"
+        additionalProperties:
+          type: "string"
+      QuotaID:
+        type: "string"
+        description: "set disk quota by specified quota id, if id < 0, it means pouchd alloc a unique quota id"
  
   ContainerCreateResp:
     description: "response returned by daemon when container create successfully"
@@ -1184,8 +1933,7 @@ definitions:
           PortBindings:
             type: "object"
             description: "A map of exposed container ports and the host port they should map to."
-            additionalProperties:
-              $ref: "#/definitions/PortBinding"
+            $ref: "#/definitions/PortMap"
           AutoRemove:
             type: "boolean"
             description: "Automatically remove the container when the container's process exits. This has no effect if `RestartPolicy` is set."
@@ -1254,8 +2002,14 @@ definitions:
               type: "string"
           OomScoreAdj:
             type: "integer"
-            description: "An integer value containing the score given to the container in order to tune OOM killer preferences."
-            example: 500
+            description: |
+                An integer value containing the score given to the container in order to tune OOM killer preferences.
+                The range is in [-1000, 1000].
+            type: "integer"
+            format: "int"
+            x-nullable: false
+            minimum: -1000
+            maximum: 1000
           PidMode:
             type: "string"
             description: |
@@ -1350,20 +2104,32 @@ definitions:
       - properties:
           RestartPolicy:
             $ref: "#/definitions/RestartPolicy"
-          Image:
-            type: "string"
-            description: "Image ID or Name"
           Env:
             description: |
               A list of environment variables to set inside the container in the form `["VAR=value", ...]`. A variable without `=` is removed from the environment, rather than to have an empty value.
             type: "array"
             items:
               type: "string"
-          Labels:
+          Label:
             description: "List of labels set to container."
-            type: "object"
-            additionalProperties:
+            type: "array"
+            items:
               type: "string"
+          DiskQuota:
+            type: "string"
+            description: "update disk quota for container"
+
+  ContainerUpgradeConfig:
+    description: |
+      ContainerUpgradeConfig is used for API "POST /containers/upgrade".
+      It wraps all kinds of config used in container upgrade.
+      It can be used to encode client params in client and unmarshal request body in daemon side.
+    allOf:
+      - $ref: "#/definitions/ContainerConfig"
+      - type: "object"
+        properties:
+          HostConfig:
+            $ref: "#/definitions/HostConfig"
 
   Resources:
     description: "A container's resources (cgroups config, ulimits, etc)"
@@ -1424,12 +2190,15 @@ definitions:
           The length of a CPU period in microseconds.
         type: "integer"
         format: "int64"
+        minimum: 1000
+        maximum: 1000000
       CpuQuota:
         description: |
           CPU CFS (Completely Fair Scheduler) quota.
           Microseconds of CPU time that the container can get in a CPU period."
         type: "integer"
         format: "int64"
+        minimum: 1000
       CpuRealtimePeriod:
         description: "The length of a CPU real-time period in microseconds. Set to 0 to allocate no time allocated to real-time tasks."
         type: "integer"
@@ -1456,10 +2225,6 @@ definitions:
         items:
           type: "string"
           example: "c 13:* rwm"
-      DiskQuota:
-        description: "Disk limit (in bytes)."
-        type: "integer"
-        format: "int64"
       KernelMemory:
         description: "Kernel memory limit in bytes."
         type: "integer"
@@ -1488,7 +2253,7 @@ definitions:
         x-nullable: true
       PidsLimit:
         description: |
-          Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this paramter support.
+          Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this parameter support.
         type: "integer"
         format: "int64"
       Ulimits:
@@ -1496,17 +2261,7 @@ definitions:
           A list of resource limits to set in the container. For example: `{"Name": "nofile", "Soft": 1024, "Hard": 2048}`"
         type: "array"
         items:
-          type: "object"
-          properties:
-            Name:
-              description: "Name of ulimit"
-              type: "string"
-            Soft:
-              description: "Soft limit"
-              type: "integer"
-            Hard:
-              description: "Hard limit"
-              type: "integer"
+          $ref: "#/definitions/Ulimit"
       # Applicable to Windows
       CpuCount:
         description: |
@@ -1610,13 +2365,28 @@ definitions:
       PathInContainer: "/dev/deviceName"
       CgroupPermissions: "mrw"
 
+  Ulimit:
+    type: "object"
+    description: "A list of resource limits"
+    properties:
+      Name:
+        description: "Name of ulimit"
+        type: "string"
+      Soft:
+        description: "Soft limit"
+        type: "integer"
+      Hard:
+        description: "Hard limit"
+        type: "integer"
+
   Container:
     description: |
       an array of Container contains response of Engine API:
       GET "/containers/json"
     type: "object"
     properties:
-      ID:
+      Id:
+        description: "Container ID"
         type: "string"
       Names:
         type: "array"
@@ -1779,23 +2549,35 @@ definitions:
         items:
           type: "string"
 
+  NetworkDisconnect:
+    description: "Parameters of network disconnect"
+    type: "object"
+    properties:
+      Container:
+        type: "string"
+        description: "The ID or name of the container to disconnect from the network."
+      Force:
+        type: "boolean"
+        description: "Force the container to disconnect from the network."
+
   ImageInfo:
     description: "An object containing all details of an image at API side"
     type: "object"
     properties:
-      ID:
+      Id:
         description: "ID of an image."
         type: "string"
         x-nullable: false
-      Name:
-        description: "name of an image."
-        type: "string"
-      Tag:
-        description: "tag of an image."
-        type: "string"
-      Digest:
-        description: "digest of image."
-        type: "string"
+      RepoTags:
+        description: "repository with tag."
+        type: "array"
+        items:
+          type: "string"
+      RepoDigests:
+        description: "repository with digest."
+        type: "array"
+        items:
+          type: "string"
       CreatedAt:
         description: "time of image creation."
         type: "string"
@@ -1893,7 +2675,7 @@ definitions:
     type: "object"
     properties:
       Name:
-        description: "The new volume's name. If not specified, Docker generates a name."
+        description: "The new volume's name. If not specified, Pouch generates a name."
         type: "string"
         x-nullable: false
       Driver:
@@ -1937,6 +2719,7 @@ definitions:
 
   ExecCreateConfig:
     type: "object"
+    description: is a small subset of the Config struct that holds the configuration.
     properties:
       User:
         type: "string"
@@ -1969,15 +2752,34 @@ definitions:
         minItems: 1
         items:
           type: "string"
+  ContainerProcessList:
+    description: OK Response to ContainerTop operation
+    type: "object"
+    properties:
+      Titles:
+        description: "The ps column titles"
+        type: "array"
+        items:
+          type: "string"
+      Processes:
+        description: "Each process running in the container, where each is process is an array of values corresponding to the titles"
+        type: "array"
+        items:
+          type: "array"
+          items:
+            type: "string"
 
   ExecCreateResp:
     type: "object"
+    description: contains response of Remote API POST "/containers/{name:.*}/exec".
     properties:
-      ID:
+      Id:
         type: "string"
+        description: ID is the exec ID
 
   ExecStartConfig:
     type: "object"
+    description: ExecStartConfig is a temp struct used by execStart.
     properties:
       Detach:
         description: ExecStart will first check if it's detached
@@ -1989,6 +2791,51 @@ definitions:
       Detach: false
       Tty: false
   
+  ContainerExecInspect:
+    type: "object"
+    description: holds information about a running process started.
+    properties:
+      ID:
+        type: "string"
+        description: "The ID of this exec"
+      Running:
+        type: "boolean"
+      ExitCode:
+        type: "integer"
+        description: "The last exit code of this container"
+      ProcessConfig:
+        $ref: "#/definitions/ProcessConfig"
+      OpenStdin:
+        type: "boolean"
+      OpenStderr:
+        type: "boolean"
+      OpenStdout:
+        type: "boolean"
+      CanRemove:
+        type: "boolean"
+      ContainerID:
+        type: "string"
+        description: "The ID of this container"
+      DetachKeys:
+        type: "string"
+
+  ProcessConfig:
+    type: "object"
+    description: ExecProcessConfig holds information about the exec process.
+    properties:
+      privileged:
+        type: "boolean"
+      user:
+        type: "string"
+      tty:
+        type: "boolean"
+      entrypoint:
+        type: "string"
+      arguments:
+        type: "array"
+        items:
+          type: "string"
+
   ContainerJSON:
     description: | 
       ContainerJSON contains response of Engine API:
@@ -2051,6 +2898,8 @@ definitions:
         x-nullable: true
       Config:
         $ref: "#/definitions/ContainerConfig"
+      Snapshotter:
+        $ref: "#/definitions/SnapshotterData"
       GraphDriver:
         $ref: "#/definitions/GraphDriverData"
       Mounts:
@@ -2064,6 +2913,7 @@ definitions:
 
   ContainerState:
     type: "object"
+    required: [StartedAt, FinishedAt]
     properties:
       Status:
         $ref: "#/definitions/Status"
@@ -2104,14 +2954,62 @@ definitions:
       StartedAt:
         description: "The time when this container was last started."
         type: "string"
+        x-nullable: false
       FinishedAt:
         description: "The time when this container last exited."
         type: "string"
+        x-nullable: false
+
+  ContainerLogsOptions:
+    type: "object"
+    properties:
+      ShowStdout:
+        description: "Return logs from `stdout`"
+        type: "boolean"
+      ShowStderr:
+        description: "Return logs from `stderr`"
+        type: "boolean"
+      Since:
+        description: "Only return logs after this time, as a UNIX timestamp"
+        type: "string"
+      Until:
+        description: "Only reture logs before this time, as a UNIX timestamp"
+        type: "string"
+      Timestamps:
+        description: "Add timestamps to every log line"
+        type: "boolean"
+      Follow:
+        description: "Return logs as a stream"
+        type: "boolean"
+      Tail:
+        description: "Only reture this number of log lines from the end of the logs. Specify as an integer or `all` to output all log lines."
+        type: "string"
+      Details:
+        description: "Show extra details provided to logs"
+        type: "boolean"
+
+
+    description: The parameters to filter the log.
+
 
   Status:
     description: The status of the container. For example, "running" or "exited".
     type: "string"
     enum: ["created", "running", "stopped", "paused", "restarting", "removing", "exited", "dead"]
+
+  SnapshotterData:
+    description: "Information about a container's snapshotter."
+    type: "object"
+    required: [Name, Data]
+    properties:
+      Name:
+        type: "string"
+        x-nullable: false
+      Data:
+        type: "object"
+        x-nullable: false
+        additionalProperties:
+          type: "string"
 
   GraphDriverData:
     description: "Information about a container's graph driver."
@@ -2134,6 +3032,8 @@ definitions:
     properties:
       Type:
         type: "string"
+      ID:
+        type: "string"
       Name:
         type: "string"
       Source:
@@ -2146,6 +3046,12 @@ definitions:
         type: "string"
       RW:
         type: "boolean"
+      CopyData:
+        type: "boolean"
+      Named:
+        type: "boolean"
+      Replace:
+        type: "string"
       Propagation:
         type: "string"
 
@@ -2263,6 +3169,16 @@ definitions:
       MaximumRetryCount:
         type: "integer"
 
+  NetworkConnect:
+    type: "object"
+    description: "contains the request for the remote API: POST /networks/{id:.*}/connect"
+    properties:
+      Container:
+        type: "string"
+        description: "The ID or name of the container to connect to the network."
+      EndpointConfig:
+        $ref: "#/definitions/EndpointSettings"
+
   NetworkCreateConfig:
     type: "object"
     description: "contains the request for the remote API: POST /networks/create"
@@ -2277,7 +3193,7 @@ definitions:
     type: "object"
     description: "contains the response for the remote API: POST /networks/create"
     properties:
-      ID:
+      Id:
         description: "ID is the id of the network."
         type: "string"
       Warning:
@@ -2318,7 +3234,7 @@ definitions:
       Name:
         type: "string"
         description: "Name is the requested name of the network"
-      ID:
+      Id:
         type: "string"
         description: "ID uniquely identifies a network on a single machine"
       Scope:
@@ -2348,40 +3264,77 @@ definitions:
         additionalProperties:
           type: "string"
 
-  NetworkInfo:
-      type: "object"
-      description: "NetworkInfo represents the configuration of a network"
-      properties:
-        Name:
-          description: "Name is the name of the network."
+  NetworkResource:
+    type: "object"
+    description: "NetworkResource is the body of the \"get network\" http response message"
+    properties:
+      Name:
+        description: "Name is the requested name of the network"
+        type: "string"
+      Id:
+        description: "ID uniquely identifies a network on a single machine"
+        type: "string"
+      Scope:
+        description: "Scope describes the level at which the network exists (e.g. `global` for cluster-wide or `local` for machine level)"
+        type: "string"
+      Driver:
+        description: "Driver is the Driver name used to create the network (e.g. `bridge`, `overlay`)"
+        type: "string"
+      EnableIPv6:
+        description: "EnableIPv6 represents whether to enable IPv6"
+        type: "boolean"
+      IPAM:
+        description: ""
+        type: "object"
+        $ref: "#/definitions/IPAM"
+      Internal:
+        description: "Internal represents if the network is used internal only"
+        type: "boolean"
+      Containers:
+        description: "Containers contains endpoints belonging to the network"
+        type: "object"
+      IndexConfigs:
+        type: "object"
+        additionalProperties:
+          $ref: "#/definitions/EndpointResource"
+      Options:
+        description: "Options holds the network specific options to use for when creating the network"
+        type: "object"
+        x-nullable: true
+        additionalProperties:
           type: "string"
-        ID:
+        example:
+          com.example.some-options: "some-option"
+          com.example.some-other-options: "some-other-option"
+      Labels:
+        description: "Labels holds metadata specific to the network being created"
+        type: "object"
+        x-nullable: true
+        additionalProperties:
           type: "string"
-          description: "ID uniquely identifies a network on a single machine"
-        Driver:
-          type: "string"
-          description: "Driver is the Driver name used to create the network"
-        Scope:
-          type: "string"
-          description: "Scope describes the level at which the network exists"
+        example:
+          com.example.some-label: "some-label"
+          com.example.some-other-label: "some-other-label"
 
-
-  NetworkListResp:
-      type: "object"
-      required: [Networks, Warnings]
-      properties:
-        Networks:
-          type: "array"
-          x-nullable: false
-          description: "List of networks"
-          items:
-            $ref: "#/definitions/NetworkInfo"
-        Warnings:
-          type: "array"
-          x-nullable: false
-          description: "Warnings that occurred when fetching the list of networks"
-          items:
-            type: "string"
+  EndpointResource:
+    type: "object"
+    description: "NetworkResource is the body of the \"get network\" http response message"
+    properties:
+      Name:
+        description: "Name is the requested name of the network"
+        type: "string"
+      EndpointID:
+        description: "EndpointID represents the endpoint's id"
+        type: "string"
+      MacAddress:
+        description: "MacAddress represents the enpoint's mac address"
+        type: "string"
+      IPv4Address:
+        description: "IPv4Address represents the enpoint's ipv4 address"
+        type: "string"
+      IPv6Address:
+        description: "IPv4Address represents the enpoint's ipv6 address"
+        type: "string"
 
   IPAM:
     type: "object"
@@ -2414,6 +3367,26 @@ definitions:
         additionalProperties:
           type: "string"
 
+  ResizeOptions:
+    description: "options of resizing container tty size"
+    type: "object"
+    properties:
+      Height:
+        type: "integer"
+      Width:
+        type: "integer"
+
+  ContainerRemoveOptions:
+    description: "options of remove container"
+    type: "object"
+    properties:
+      Force:
+        type: "boolean"
+      Volumes:
+        type: "boolean"
+      Link:
+        type: "boolean"
+
 parameters:
   id:
     name: id
@@ -2430,14 +3403,14 @@ parameters:
 
 responses:
   401ErrorResponse:
-    description: An unexpected 401 error occured.
+    description: An unexpected 401 error occurred.
     schema:
       $ref: "#/definitions/Error"
   404ErrorResponse:
-    description: An unexpected 404 error occured.
+    description: An unexpected 404 error occurred.
     schema:
       $ref: "#/definitions/Error"
   500ErrorResponse:
-    description: An unexpected server error occured.
+    description: An unexpected server error occurred.
     schema:
       $ref: "#/definitions/Error"

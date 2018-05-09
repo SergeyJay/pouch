@@ -1,27 +1,54 @@
 package main
 
 import (
-	"bufio"
-	"net"
-	"net/http"
-	"net/url"
+	"os"
 
-	"github.com/alibaba/pouch/apis/types"
-	"github.com/alibaba/pouch/test/request"
+	"github.com/alibaba/pouch/test/environment"
 
 	"github.com/go-check/check"
 )
 
 // const defines common image name
-const (
-	busyboxImage                = "registry.hub.docker.com/library/busybox:latest"
-	helloworldImage             = "registry.hub.docker.com/library/hello-world"
-	helloworldImageLatest       = "registry.hub.docker.com/library/hello-world:latest"
+var (
+	busyboxImage                string
+	helloworldImage             string
 	helloworldImageOnlyRepoName = "hello-world"
 
-	GateWay = "192.168.1.1"
-	Subnet  = "192.168.1.0/24"
+	// GateWay test gateway
+	GateWay string
+
+	// Subnet test subnet
+	Subnet string
 )
+
+const (
+	busyboxImage125 = "registry.hub.docker.com/library/busybox:1.25"
+	testHubAddress  = "registry.hub.docker.com"
+	testHubUser     = "pouchcontainertest"
+	testHubPasswd   = "pouchcontainertest"
+
+	testDaemonHTTPSAddr = "tcp://0.0.0.0:2000"
+	serverCa            = "/tmp/tls/server/ca.pem"
+	serverCert          = "/tmp/tls/server/cert.pem"
+	serverKey           = "/tmp/tls/server/key.pem"
+	clientCa            = "/tmp/tls/a_client/ca.pem"
+	clientCert          = "/tmp/tls/a_client/cert.pem"
+	clientKey           = "/tmp/tls/a_client/key.pem"
+	clientWrongCa       = "/tmp/tls/a_client/ca_wrong.pem"
+)
+
+func init() {
+	// Get test images config from test environment.
+	environment.GetBusybox()
+	environment.GetHelloWorld()
+
+	busyboxImage = environment.BusyboxRepo + ":" + environment.BusyboxTag
+	helloworldImage = environment.HelloworldRepo + ":" + environment.HelloworldTag
+
+	GateWay = environment.GateWay
+	Subnet = environment.Subnet
+
+}
 
 // VerifyCondition is used to check the condition value.
 type VerifyCondition func() bool
@@ -35,214 +62,25 @@ func SkipIfFalse(c *check.C, conditions ...VerifyCondition) {
 	}
 }
 
-// CreateBusyboxContainerOk creates a busybox container and asserts success.
-func CreateBusyboxContainerOk(c *check.C, cname string, cmd ...string) {
-	// If not specified, CMD executed in container is "top".
-	if len(cmd) == 0 {
-		cmd = []string{"top"}
+// IsTLSExist check if the TLS related file exists.
+func IsTLSExist() bool {
+	if _, err := os.Stat(serverCa); os.IsNotExist(err) {
+		return false
 	}
-
-	resp, err := CreateBusyboxContainer(c, cname, cmd...)
-	c.Assert(err, check.IsNil)
-	CheckRespStatus(c, resp, 201)
-}
-
-// CreateBusyboxContainer creates a basic container using busybox image.
-func CreateBusyboxContainer(c *check.C, cname string, cmd ...string) (*http.Response, error) {
-	q := url.Values{}
-	q.Add("name", cname)
-
-	obj := map[string]interface{}{
-		"Image":      busyboxImage,
-		"Cmd":        cmd,
-		"HostConfig": map[string]interface{}{},
+	if _, err := os.Stat(serverKey); os.IsNotExist(err) {
+		return false
 	}
-
-	path := "/containers/create"
-	query := request.WithQuery(q)
-	body := request.WithJSONBody(obj)
-	return request.Post(path, query, body)
-}
-
-// StartContainerOk starts the container and asserts success.
-func StartContainerOk(c *check.C, cname string) {
-	resp, err := StartContainer(c, cname)
-	c.Assert(err, check.IsNil)
-
-	CheckRespStatus(c, resp, 204)
-}
-
-// StartContainer starts the container.
-func StartContainer(c *check.C, cname string) (*http.Response, error) {
-	return request.Post("/containers/" + cname + "/start")
-}
-
-// DelContainerForceOk forcely deletes the container and asserts success.
-func DelContainerForceOk(c *check.C, cname string) {
-	resp, err := DelContainerForce(c, cname)
-	c.Assert(err, check.IsNil)
-
-	CheckRespStatus(c, resp, 204)
-}
-
-// DelContainerForce forcely deletes the container.
-func DelContainerForce(c *check.C, cname string) (*http.Response, error) {
-	q := url.Values{}
-	q.Add("force", "true")
-	return request.Delete("/containers/"+cname, request.WithQuery(q))
-}
-
-// StopContainerOk stops the container and asserts success..
-func StopContainerOk(c *check.C, cname string) {
-	resp, err := StopContainer(c, cname)
-	c.Assert(err, check.IsNil)
-
-	CheckRespStatus(c, resp, 204)
-}
-
-// StopContainer stops the container.
-func StopContainer(c *check.C, cname string) (*http.Response, error) {
-	return request.Post("/containers/" + cname + "/stop")
-}
-
-// PauseContainerOk pauses the container and asserts success..
-func PauseContainerOk(c *check.C, cname string) {
-	resp, err := PauseContainer(c, cname)
-	c.Assert(err, check.IsNil)
-
-	CheckRespStatus(c, resp, 204)
-}
-
-// PauseContainer pauses the container.
-func PauseContainer(c *check.C, cname string) (*http.Response, error) {
-	return request.Post("/containers/" + cname + "/pause")
-}
-
-// UnpauseContainerOk unpauses the container and asserts success..
-func UnpauseContainerOk(c *check.C, cname string) {
-	resp, err := UnpauseContainer(c, cname)
-	c.Assert(err, check.IsNil)
-
-	CheckRespStatus(c, resp, 204)
-}
-
-// UnpauseContainer unpauses the container.
-func UnpauseContainer(c *check.C, cname string) (*http.Response, error) {
-	return request.Post("/containers/" + cname + "/unpause")
-}
-
-// CheckRespStatus checks the http.Response.Status is equal to status.
-func CheckRespStatus(c *check.C, resp *http.Response, status int) {
-	if resp.StatusCode != status {
-		got := types.Error{}
-		_ = request.DecodeBody(&got, resp.Body)
-		c.Assert(resp.StatusCode, check.Equals, status, check.Commentf("Error:%s", got.Message))
+	if _, err := os.Stat(serverCert); os.IsNotExist(err) {
+		return false
 	}
-}
-
-// IsContainerCreated returns true is container's state is created.
-func IsContainerCreated(c *check.C, cname string) (bool, error) {
-	return isContainerStateEqual(c, cname, "created")
-}
-
-// IsContainerRunning returns true is container's state is running.
-func IsContainerRunning(c *check.C, cname string) (bool, error) {
-	return isContainerStateEqual(c, cname, "running")
-}
-
-func isContainerStateEqual(c *check.C, cname string, status string) (bool, error) {
-	resp, err := request.Get("/containers/" + cname + "/json")
-	c.Assert(err, check.IsNil)
-	CheckRespStatus(c, resp, 200)
-
-	defer resp.Body.Close()
-	got := types.ContainerJSON{}
-	err = request.DecodeBody(&got, resp.Body)
-	c.Assert(err, check.IsNil)
-
-	if got.State == nil {
-		return false, nil
+	if _, err := os.Stat(clientCa); os.IsNotExist(err) {
+		return false
 	}
-
-	return string(got.State.Status) == status, nil
-}
-
-// DelNetworkOk deletes the network and asserts success.
-func DelNetworkOk(c *check.C, cname string) {
-	resp, err := DelNetwork(c, cname)
-	c.Assert(err, check.IsNil)
-
-	CheckRespStatus(c, resp, 204)
-}
-
-// DelNetwork  deletes the network.
-func DelNetwork(c *check.C, cname string) (*http.Response, error) {
-	return request.Delete("/networks/" + cname)
-}
-
-// CreateExecEchoOk exec process's environment with "echo" CMD.
-func CreateExecEchoOk(c *check.C, cname string) string {
-	// NOTICE:
-	// All files in the obj is needed, or start a new process may hang.
-	obj := map[string]interface{}{
-		"Cmd":          []string{"echo", "test"},
-		"Detach":       true,
-		"AttachStderr": true,
-		"AttachStdout": true,
-		"AttachStdin":  true,
-		"Privileged":   false,
-		"User":         "",
+	if _, err := os.Stat(clientCert); os.IsNotExist(err) {
+		return false
 	}
-	body := request.WithJSONBody(obj)
-
-	resp, err := request.Post("/containers/"+cname+"/exec", body)
-	c.Assert(err, check.IsNil)
-	CheckRespStatus(c, resp, 201)
-
-	var got types.ExecCreateResp
-	request.DecodeBody(&got, resp.Body)
-	return got.ID
-}
-
-// StartContainerExec starts executing a process in the container.
-func StartContainerExec(c *check.C, execid string, tty bool, detach bool) (*http.Response, net.Conn, *bufio.Reader, error) {
-	obj := map[string]interface{}{
-		"Detach": detach,
-		"Tty":    tty,
+	if _, err := os.Stat(clientKey); os.IsNotExist(err) {
+		return false
 	}
-
-	return request.Hijack("/exec/"+execid+"/start",
-		request.WithHeader("Connection", "Upgrade"),
-		request.WithHeader("Upgrade", "tcp"),
-		request.WithJSONBody(obj))
-}
-
-// CreateVolume creates a volume in pouchd.
-func CreateVolume(c *check.C, name, driver string) error {
-	obj := map[string]interface{}{
-		"Driver": driver,
-		"Name":   name,
-	}
-	path := "/volumes/create"
-	body := request.WithJSONBody(obj)
-
-	resp, err := request.Post(path, body)
-	defer resp.Body.Close()
-
-	c.Assert(err, check.IsNil)
-	CheckRespStatus(c, resp, 201)
-
-	return err
-}
-
-// RemoveVolume removes a volume in pouchd.
-func RemoveVolume(c *check.C, name string) error {
-	path := "/volumes/" + name
-	resp, err := request.Delete(path)
-	defer resp.Body.Close()
-
-	c.Assert(err, check.IsNil)
-	CheckRespStatus(c, resp, 204)
-
-	return err
+	return true
 }

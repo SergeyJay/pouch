@@ -3,81 +3,63 @@ package mgr
 import (
 	"context"
 
+	"github.com/alibaba/pouch/ctrd"
+
 	specs "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/pkg/errors"
 )
 
 // SpecWrapper wraps the container's specs and add manager operations.
 type SpecWrapper struct {
 	s *specs.Spec
 
-	ctrMgr ContainerMgr
-	volMgr VolumeMgr
-	netMgr NetworkMgr
+	ctrMgr  ContainerMgr
+	volMgr  VolumeMgr
+	netMgr  NetworkMgr
+	prioArr []int
+	argsArr [][]string
 }
 
-// SetupFunc defines spec setup function type.
-type SetupFunc func(ctx context.Context, m *ContainerMeta, s *SpecWrapper) error
-
-var setupFunc = []SetupFunc{
-	// process
-	setupProcessArgs,
-	setupProcessCwd,
-	setupProcessEnv,
-	setupProcessTTY,
-	setupProcessUser,
-	setupCap,
-
-	// cgroup
-	setupCgroupCPUShare,
-	setupCgroupCPUSet,
-	setupCgroupMemory,
-	setupCgroupMemorySwap,
-	setupCgroupMemorySwappiness,
-
-	// namespaces
-	setupUserNamespace,
-	setupNetworkNamespace,
-	setupIpcNamespace,
-	setupPidNamespace,
-	setupUtsNamespace,
-
-	// volume spec
-	setupMounts,
-
-	// network spec
-	setupNetwork,
-
-	// host device spec
-	setupDevices,
-
-	// linux-platform-specifc spec
-	setupSysctl,
-	setupAppArmor,
-	setupCapabilities,
-	setupSeccomp,
-
-	// blkio spec
-	setupBlkio,
-
-	// IntelRdtL3Cbm
-	setupIntelRdt,
-
-	// annotations in spec
-	setupAnnotations,
-
-	//hook
-	setupHook,
-}
-
-// Register is used to registe spec setup function.
-func Register(f SetupFunc) {
-	if setupFunc == nil {
-		setupFunc = make([]SetupFunc, 0)
+// createSpec create a runtime-spec.
+func createSpec(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+	// new a default spec from containerd.
+	s, err := ctrd.NewDefaultSpec(ctx, c.ID)
+	if err != nil {
+		return errors.Wrapf(err, "failed to generate spec: %s", c.ID)
 	}
-	setupFunc = append(setupFunc, f)
-}
+	specWrapper.s = s
 
-// SetupFuncs returns all the spec setup functions.
-func SetupFuncs() []SetupFunc {
-	return setupFunc
+	s.Hostname = c.Config.Hostname.String()
+	s.Root = &specs.Root{
+		Path:     c.BaseFS,
+		Readonly: c.HostConfig.ReadonlyRootfs,
+	}
+
+	// create Spec.Process spec
+	if err := setupProcess(ctx, c, s); err != nil {
+		return err
+	}
+
+	// create Spec.Mounts spec
+	if err := setupMounts(ctx, c, s); err != nil {
+		return err
+	}
+
+	// create Spec.Annotations
+	if err := setupAnnotations(ctx, c, s); err != nil {
+		return err
+	}
+
+	// create Spec.Hooks spec
+	if err := setupHook(ctx, c, specWrapper); err != nil {
+		return err
+	}
+
+	// platform-specified spec setting
+	// TODO: support window and Solaris platform
+	if err := populatePlatform(ctx, c, specWrapper); err != nil {
+		return err
+	}
+
+	return nil
 }

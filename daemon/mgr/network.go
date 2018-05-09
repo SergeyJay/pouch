@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"path"
+	"strings"
+	"time"
 
 	apitypes "github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/daemon/config"
@@ -15,6 +17,7 @@ import (
 	"github.com/alibaba/pouch/pkg/randomid"
 
 	netlog "github.com/Sirupsen/logrus"
+	"github.com/docker/go-connections/nat"
 	"github.com/docker/libnetwork"
 	nwconfig "github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/netlabel"
@@ -148,26 +151,90 @@ func (nm *NetworkManager) List(ctx context.Context, labels map[string]string) ([
 	return net, nil
 }
 
-// Get returns the information of network that specified name/id.
-func (nm *NetworkManager) Get(ctx context.Context, name string) (*types.Network, error) {
+// GetNetworkByName returns the information of network that specified name.
+func (nm *NetworkManager) GetNetworkByName(name string) (*types.Network, error) {
 	n, err := nm.controller.NetworkByName(name)
 	if err != nil {
-		if err == libnetwork.ErrNoSuchNetwork(name) {
-			return nil, errors.Wrap(errtypes.ErrNotfound, err.Error())
+		return nil, err
+	}
+	return &types.Network{
+		Name:    n.Name(),
+		ID:      n.ID(),
+		Type:    n.Type(),
+		Network: n,
+	}, nil
+}
+
+// GetNetworksByPartialID returns a list of networks that ID starts with the given prefix.
+func (nm *NetworkManager) GetNetworksByPartialID(partialID string) []*types.Network {
+	var matchedNetworks []*types.Network
+
+	walker := func(nw libnetwork.Network) bool {
+		if strings.HasPrefix(nw.ID(), partialID) {
+			matchedNetwork := &types.Network{
+				Name:    nw.Name(),
+				ID:      nw.ID(),
+				Type:    nw.Type(),
+				Network: nw,
+			}
+			matchedNetworks = append(matchedNetworks, matchedNetwork)
 		}
+		return false
+	}
+	nm.controller.WalkNetworks(walker)
+	return matchedNetworks
+}
+
+// GetNetworkByPartialID returns the information of network that ID starts with the given prefix.
+// If there are not matching networks, it fails with ErrNotfound.
+// If there are multiple matching networks, it fails with ErrTooMany.
+func (nm *NetworkManager) GetNetworkByPartialID(partialID string) (*types.Network, error) {
+	network, err := nm.controller.NetworkByID(partialID)
+	if err == nil {
+		return &types.Network{
+			Name:    network.Name(),
+			ID:      network.ID(),
+			Type:    network.Type(),
+			Network: network,
+		}, nil
+	}
+	if !isNoSuchNetworkError(err) {
+		return nil, err
+	}
+	matchedNetworks := nm.GetNetworksByPartialID(partialID)
+	if len(matchedNetworks) == 0 {
+		return nil, errors.Wrap(errtypes.ErrNotfound, "network: "+partialID)
+	}
+	if len(matchedNetworks) > 1 {
+		return nil, errors.Wrap(errtypes.ErrTooMany, "network: "+partialID)
+	}
+	return matchedNetworks[0], nil
+}
+
+// isNoSuchNetworkError looks up the error type and returns a bool if it is ErrNoSuchNetwork or not.
+func isNoSuchNetworkError(err error) bool {
+	_, ok := err.(libnetwork.ErrNoSuchNetwork)
+	return ok
+}
+
+// Get returns the information of network for specified string that represent network name or ID.
+// If network name is given, the network with same name is returned.
+// If prefix of network ID is given, the network with same prefix is returned.
+func (nm *NetworkManager) Get(ctx context.Context, idName string) (*types.Network, error) {
+	n, err := nm.GetNetworkByName(idName)
+	if err != nil && !isNoSuchNetworkError(err) {
 		return nil, err
 	}
 
 	if n != nil {
-		return &types.Network{
-			Name:    name,
-			ID:      n.ID(),
-			Type:    n.Type(),
-			Network: n,
-		}, nil
+		return n, nil
 	}
 
-	return nil, nil
+	n, err = nm.GetNetworkByPartialID(idName)
+	if err != nil {
+		return nil, err
+	}
+	return n, err
 }
 
 // EndpointCreate is used to create network endpoint.
@@ -191,7 +258,7 @@ func (nm *NetworkManager) EndpointCreate(ctx context.Context, endpoint *types.En
 	}
 
 	// create endpoint
-	epOptions, err := endpointOptions(n, networkConfig, endpointConfig)
+	epOptions, err := endpointOptions(n, endpoint)
 	if err != nil {
 		return "", err
 	}
@@ -199,36 +266,40 @@ func (nm *NetworkManager) EndpointCreate(ctx context.Context, endpoint *types.En
 	endpointName := containerID[:8]
 	ep, err := n.CreateEndpoint(endpointName, epOptions...)
 	if err != nil {
-		logrus.Errorf("failed to create endpoint, err: %v", err)
 		return "", err
 	}
+
+	defer func() {
+		if err != nil {
+			if err := ep.Delete(true); err != nil {
+				logrus.Errorf("could not delete endpoint %s after failing to create endpoint: %v", ep.Name(), err)
+			}
+		}
+	}()
 
 	// create sandbox
 	sb := nm.getNetworkSandbox(containerID)
 	if sb == nil {
 		sandboxOptions, err := nm.sandboxOptions(endpoint)
 		if err != nil {
-			logrus.Errorf("failed to build sandbox options, err: %v", err)
-			return "", err
+			return "", fmt.Errorf("failed to build sandbox options: %v", err)
 		}
 
 		sb, err = nm.controller.NewSandbox(containerID, sandboxOptions...)
 		if err != nil {
-			logrus.Errorf("failed to create sandbox, err: %v", err)
-			return "", err
+			return "", fmt.Errorf("failed to create sandbox: %v", err)
 		}
 	}
 	networkConfig.SandboxID = sb.ID()
 	networkConfig.SandboxKey = sb.Key()
 
 	// endpoint joins into sandbox
-	joinOptions, err := joinOptions(endpointConfig)
+	joinOptions, err := joinOptions(endpoint)
 	if err != nil {
 		return "", err
 	}
 	if err := ep.Join(sb, joinOptions...); err != nil {
-		logrus.Errorf("failed to join sandbox, err: %v", err)
-		return "", err
+		return "", fmt.Errorf("failed to join sandbox: %v", err)
 	}
 
 	// update endpoint settings
@@ -248,7 +319,7 @@ func (nm *NetworkManager) EndpointCreate(ctx context.Context, endpoint *types.En
 		if iface.Address() != nil {
 			mask, _ := iface.Address().Mask.Size()
 			endpointConfig.IPPrefixLen = int64(mask)
-			endpointConfig.IPAddress = iface.Address().String()
+			endpointConfig.IPAddress = iface.Address().IP.String()
 		}
 
 		if iface.MacAddress() != nil {
@@ -408,22 +479,23 @@ func (nm *NetworkManager) getNetworkSandbox(id string) libnetwork.Sandbox {
 	return sb
 }
 
+// libnetwork's logrus version is different from pouchd,
+// so we need to set libnetwork's logrus addintionly.
 func initNetworkLog(cfg *config.Config) {
 	if cfg.Debug {
 		netlog.SetLevel(netlog.DebugLevel)
 	}
 
 	formatter := &netlog.TextFormatter{
-		ForceColors:     true,
 		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02 15:04:05.000000000",
+		TimestampFormat: time.RFC3339Nano,
 	}
 	netlog.SetFormatter(formatter)
 }
 
-func endpointOptions(n libnetwork.Network, nwconfig *apitypes.NetworkSettings, epConfig *apitypes.EndpointSettings) ([]libnetwork.EndpointOption, error) {
+func endpointOptions(n libnetwork.Network, endpoint *types.Endpoint) ([]libnetwork.EndpointOption, error) {
 	var createOptions []libnetwork.EndpointOption
-
+	epConfig := endpoint.EndpointConfig
 	if epConfig != nil {
 		ipam := epConfig.IPAMConfig
 		if ipam != nil && (ipam.IPV4Address != "" || ipam.IPV6Address != "" || len(ipam.LinkLocalIps) > 0) {
@@ -444,6 +516,13 @@ func endpointOptions(n libnetwork.Network, nwconfig *apitypes.NetworkSettings, e
 
 	genericOption := options.Generic{}
 	createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
+
+	if len(endpoint.GenericParams) > 0 {
+		createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(endpoint.GenericParams))
+	}
+	if endpoint.DisableResolver {
+		createOptions = append(createOptions, libnetwork.CreateOptionDisableResolution())
+	}
 
 	return createOptions, nil
 }
@@ -508,6 +587,65 @@ func (nm *NetworkManager) sandboxOptions(endpoint *types.Endpoint) ([]libnetwork
 	// TODO: secondary ip address
 	// TODO: parse extra hosts
 	// TODO: port mapping
+	var bindings = make(nat.PortMap)
+	if endpoint.PortBindings != nil {
+		for p, b := range endpoint.PortBindings {
+			bindings[nat.Port(p)] = []nat.PortBinding{}
+			for _, bb := range b {
+				bindings[nat.Port(p)] = append(bindings[nat.Port(p)], nat.PortBinding{
+					HostIP:   bb.HostIP,
+					HostPort: bb.HostPort,
+				})
+			}
+		}
+	}
+
+	portSpecs := endpoint.ExposedPorts
+	var ports = make([]nat.Port, len(portSpecs))
+	var i int
+	for p := range endpoint.ExposedPorts {
+		ports[i] = nat.Port(p)
+		i++
+	}
+	nat.SortPortMap(ports, bindings)
+
+	var (
+		exposeList []networktypes.TransportPort
+		pbList     []networktypes.PortBinding
+	)
+	for _, port := range ports {
+		expose := networktypes.TransportPort{}
+		expose.Proto = networktypes.ParseProtocol(port.Proto())
+		expose.Port = uint16(port.Int())
+		exposeList = append(exposeList, expose)
+
+		pb := networktypes.PortBinding{Port: expose.Port, Proto: expose.Proto}
+		binding := bindings[port]
+		for i := 0; i < len(binding); i++ {
+			pbCopy := pb.GetCopy()
+			newP, err := nat.NewPort(nat.SplitProtoPort(binding[i].HostPort))
+			var portStart, portEnd int
+			if err == nil {
+				portStart, portEnd, err = newP.Range()
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to parsing HostPort value(%s):%v", binding[i].HostPort, err)
+			}
+			pbCopy.HostPort = uint16(portStart)
+			pbCopy.HostPortEnd = uint16(portEnd)
+			pbCopy.HostIP = net.ParseIP(binding[i].HostIP)
+			pbList = append(pbList, pbCopy)
+		}
+
+		if endpoint.PublishAllPorts && len(binding) == 0 {
+			pbList = append(pbList, pb)
+		}
+	}
+
+	sandboxOptions = append(sandboxOptions,
+		libnetwork.OptionPortMapping(pbList),
+		libnetwork.OptionExposedPorts(exposeList))
+
 	return sandboxOptions, nil
 }
 
@@ -522,9 +660,11 @@ func (nm *NetworkManager) cleanEndpointConfig(epConfig *apitypes.EndpointSetting
 	epConfig.MacAddress = ""
 }
 
-func joinOptions(epConfig *apitypes.EndpointSettings) ([]libnetwork.EndpointOption, error) {
+func joinOptions(endpoint *types.Endpoint) ([]libnetwork.EndpointOption, error) {
 	var joinOptions []libnetwork.EndpointOption
 	// TODO: parse endpoint's links
 
+	// set priority option
+	joinOptions = append(joinOptions, libnetwork.JoinOptionPriority(nil, endpoint.Priority))
 	return joinOptions, nil
 }

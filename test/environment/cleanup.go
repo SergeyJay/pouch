@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/client"
+
 	"github.com/pkg/errors"
 )
 
@@ -18,8 +20,8 @@ func PruneAllImages(apiClient client.ImageAPIClient) error {
 
 	for _, img := range images {
 		// force to remove the image
-		if err := apiClient.ImageRemove(ctx, img.Name, true); err != nil {
-			return errors.Wrap(err, fmt.Sprintf("fail to remove image (%s)", img.Name))
+		if err := apiClient.ImageRemove(ctx, img.ID, true); err != nil {
+			return errors.Wrap(err, fmt.Sprintf("fail to remove image (%s)", img.ID))
 		}
 	}
 	return nil
@@ -35,7 +37,7 @@ func PruneAllContainers(apiClient client.ContainerAPIClient) error {
 
 	for _, ctr := range containers {
 		// force to remove the containers
-		if err := apiClient.ContainerRemove(ctx, ctr.ID, true); err != nil {
+		if err := apiClient.ContainerRemove(ctx, ctr.ID, &types.ContainerRemoveOptions{Force: true}); err != nil {
 			return errors.Wrap(err, fmt.Sprintf("fail to remove container (%s)", ctr.ID))
 		}
 	}

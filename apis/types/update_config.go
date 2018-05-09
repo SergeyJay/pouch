@@ -18,15 +18,15 @@ import (
 type UpdateConfig struct {
 	Resources
 
+	// update disk quota for container
+	DiskQuota string `json:"DiskQuota,omitempty"`
+
 	// A list of environment variables to set inside the container in the form `["VAR=value", ...]`. A variable without `=` is removed from the environment, rather than to have an empty value.
 	//
 	Env []string `json:"Env"`
 
-	// Image ID or Name
-	Image string `json:"Image,omitempty"`
-
 	// List of labels set to container.
-	Labels map[string]string `json:"Labels,omitempty"`
+	Label []string `json:"Label"`
 
 	// restart policy
 	RestartPolicy *RestartPolicy `json:"RestartPolicy,omitempty"`
@@ -42,11 +42,11 @@ func (m *UpdateConfig) UnmarshalJSON(raw []byte) error {
 	m.Resources = aO0
 
 	var data struct {
+		DiskQuota string `json:"DiskQuota,omitempty"`
+
 		Env []string `json:"Env,omitempty"`
 
-		Image string `json:"Image,omitempty"`
-
-		Labels map[string]string `json:"Labels,omitempty"`
+		Label []string `json:"Label,omitempty"`
 
 		RestartPolicy *RestartPolicy `json:"RestartPolicy,omitempty"`
 	}
@@ -54,11 +54,11 @@ func (m *UpdateConfig) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 
+	m.DiskQuota = data.DiskQuota
+
 	m.Env = data.Env
 
-	m.Image = data.Image
-
-	m.Labels = data.Labels
+	m.Label = data.Label
 
 	m.RestartPolicy = data.RestartPolicy
 
@@ -76,20 +76,20 @@ func (m UpdateConfig) MarshalJSON() ([]byte, error) {
 	_parts = append(_parts, aO0)
 
 	var data struct {
+		DiskQuota string `json:"DiskQuota,omitempty"`
+
 		Env []string `json:"Env,omitempty"`
 
-		Image string `json:"Image,omitempty"`
-
-		Labels map[string]string `json:"Labels,omitempty"`
+		Label []string `json:"Label,omitempty"`
 
 		RestartPolicy *RestartPolicy `json:"RestartPolicy,omitempty"`
 	}
 
+	data.DiskQuota = m.DiskQuota
+
 	data.Env = m.Env
 
-	data.Image = m.Image
-
-	data.Labels = m.Labels
+	data.Label = m.Label
 
 	data.RestartPolicy = m.RestartPolicy
 
@@ -114,6 +114,10 @@ func (m *UpdateConfig) Validate(formats strfmt.Registry) error {
 		res = append(res, err)
 	}
 
+	if err := m.validateLabel(formats); err != nil {
+		res = append(res, err)
+	}
+
 	if err := m.validateRestartPolicy(formats); err != nil {
 		res = append(res, err)
 	}
@@ -127,6 +131,15 @@ func (m *UpdateConfig) Validate(formats strfmt.Registry) error {
 func (m *UpdateConfig) validateEnv(formats strfmt.Registry) error {
 
 	if swag.IsZero(m.Env) { // not required
+		return nil
+	}
+
+	return nil
+}
+
+func (m *UpdateConfig) validateLabel(formats strfmt.Registry) error {
+
+	if swag.IsZero(m.Label) { // not required
 		return nil
 	}
 

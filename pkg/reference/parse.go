@@ -2,7 +2,6 @@ package reference
 
 import (
 	"errors"
-	"strings"
 
 	digest "github.com/opencontainers/go-digest"
 )
@@ -15,54 +14,121 @@ var (
 	defaultTag = "latest"
 )
 
-// Parse parses ref into Reference.
-func Parse(ref string) (Reference, error) {
-	if _, err := digest.Parse(ref); err == nil {
-		return digestReference(ref), nil
-	}
-
-	return ParseNamedReference(ref)
-}
-
-// ParseNamedReference parses ref into Named reference.
-func ParseNamedReference(ref string) (Named, error) {
+// Parse parses ref into reference.Named.
+func Parse(ref string) (Named, error) {
 	if ok := regRef.MatchString(ref); !ok {
 		return nil, ErrInvalid
 	}
 
-	// if ref contains tag information
-	if loc := regTag.FindStringIndex(ref); loc != nil {
-		name, tag := ref[:loc[0]], ref[loc[0]+1:]
+	name, tag, digStr := splitReference(ref)
+	namedRef := namedReference{name}
 
+	if digStr != "" {
+		dig, err := digest.Parse(digStr)
+		if err != nil {
+			return nil, err
+		}
+
+		if tag == "" {
+			return canonicalDigestedReference{
+				Named:  namedRef,
+				digest: dig,
+			}, nil
+		}
+
+		return reference{
+			Named:  namedRef,
+			tag:    tag,
+			digest: dig,
+		}, nil
+	}
+
+	if tag != "" {
 		return taggedReference{
-			Named: namedReference{name},
+			Named: namedRef,
 			tag:   tag,
 		}, nil
 	}
-	return namedReference{ref}, nil
+	return namedRef, nil
 }
 
-// WithDefaultTagIfMissing adds default tag "latest" for the Named reference if
-// the named is not Tagged.
+// WithDefaultTagIfMissing adds default tag "latest" for the Named reference.
 func WithDefaultTagIfMissing(named Named) Named {
-	if _, ok := named.(Tagged); !ok {
+	if IsNamedOnly(named) {
 		return taggedReference{
 			Named: named,
 			tag:   defaultTag,
 		}
 	}
-
 	return named
 }
 
-// Domain retrieves domain information.
-func Domain(named string) (string, bool) {
-	i := strings.IndexRune(named, '/')
-
-	// FIXME: The domain should contain the . or :, how to handle the case
-	// which image name contains . or :?
-	if i == -1 || !strings.ContainsAny(named, ".:") {
-		return "", false
+// WithTag adds tag for the Named reference.
+func WithTag(named Named, tag string) Named {
+	return taggedReference{
+		Named: named,
+		tag:   tag,
 	}
-	return named[:i], true
+}
+
+// WithDigest adds digest for the Named reference.
+func WithDigest(named Named, dig digest.Digest) Named {
+	return canonicalDigestedReference{
+		Named:  named,
+		digest: dig,
+	}
+}
+
+// TrimTagForDigest removes the tag information if the Named reference is digest.
+func TrimTagForDigest(named Named) Named {
+	if digRef, ok := named.(Digested); ok {
+		return WithDigest(named, digRef.Digest())
+	}
+	return named
+}
+
+// IsNamedOnly return true if the ref is the Named without tag or digest.
+func IsNamedOnly(ref Named) bool {
+	if _, ok := ref.(Tagged); ok {
+		return false
+	}
+
+	if _, ok := ref.(CanonicalDigested); ok {
+		return false
+	}
+	return true
+}
+
+// IsCanonicalDigested return true if the ref is the canonical digested reference.
+func IsCanonicalDigested(ref Named) bool {
+	if _, ok := ref.(Tagged); ok {
+		return false
+	}
+
+	_, ok := ref.(CanonicalDigested)
+	return ok
+}
+
+// IsNameTagged return true if the ref is the Named with tag.
+func IsNameTagged(ref Named) bool {
+	if _, ok := ref.(Digested); ok {
+		return false
+	}
+
+	_, ok := ref.(Tagged)
+	return ok
+}
+
+// splitReference splits reference into name, tag and digest in string format.
+func splitReference(ref string) (name string, tag string, digStr string) {
+	name = ref
+
+	if loc := regDigest.FindStringIndex(name); loc != nil {
+		name, digStr = name[:loc[0]], name[loc[0]+1:]
+	}
+
+	if loc := regTag.FindStringIndex(name); loc != nil {
+		name, tag = name[:loc[0]], name[loc[0]+1:]
+	}
+	return
 }

@@ -2,12 +2,15 @@ package mgr
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/pkg/errtypes"
 	"github.com/alibaba/pouch/pkg/meta"
 	"github.com/alibaba/pouch/pkg/randomid"
 
+	"github.com/opencontainers/selinux/go-selinux/label"
 	"github.com/pkg/errors"
 )
 
@@ -101,28 +104,98 @@ func (mgr *ContainerManager) generateName(id string) string {
 }
 
 func parseSecurityOpts(meta *ContainerMeta, securityOpts []string) error {
+	var (
+		labelOpts []string
+		err       error
+	)
 	for _, securityOpt := range securityOpts {
-		if err := parseSecurityOpt(meta, securityOpt); err != nil {
-			return err
+		if securityOpt == "no-new-privileges" {
+			meta.NoNewPrivileges = true
+			continue
+		}
+		fields := strings.SplitN(securityOpt, "=", 2)
+		if len(fields) != 2 {
+			return fmt.Errorf("invalid --security-opt %s: must be in format of key=value", securityOpt)
+		}
+		key, value := fields[0], fields[1]
+		switch key {
+		// TODO: handle other security options.
+		case "apparmor":
+			meta.AppArmorProfile = value
+		case "seccomp":
+			meta.SeccompProfile = value
+		case "no-new-privileges":
+			noNewPrivileges, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("invalid --security-opt: %q", securityOpt)
+			}
+			meta.NoNewPrivileges = noNewPrivileges
+		case "label":
+			labelOpts = append(labelOpts, value)
+		default:
+			return fmt.Errorf("invalid type %s in --security-opt %s: unknown type from apparmor, seccomp, no-new-privileges and SELinux label", key, securityOpt)
 		}
 	}
+
+	if len(labelOpts) == 0 {
+		return nil
+	}
+	meta.ProcessLabel, meta.MountLabel, err = label.InitLabels(labelOpts)
+	if err != nil {
+		return fmt.Errorf("failed to init labels: %v", err)
+	}
+
 	return nil
 }
 
-func parseSecurityOpt(meta *ContainerMeta, securityOpt string) error {
-	fields := strings.SplitN(securityOpt, "=", 2)
-	if len(fields) != 2 {
-		return fmt.Errorf("invalid --security-opt %s: must be in format of key=value", securityOpt)
+// fieldsASCII is similar to strings.Fields but only allows ASCII whitespaces
+func fieldsASCII(s string) []string {
+	fn := func(r rune) bool {
+		switch r {
+		case '\t', '\n', '\f', '\r', ' ':
+			return true
+		}
+		return false
 	}
-	key, value := fields[0], fields[1]
-	switch key {
-	// TODO: handle other security options.
-	case "apparmor":
-		meta.AppArmorProfile = value
-	case "seccomp":
-		meta.SeccompProfile = value
-	default:
-		return fmt.Errorf("invalid type %s in --security-opt %s: unknown type from apparmor and seccomp", key, securityOpt)
+	return strings.FieldsFunc(s, fn)
+}
+
+func parsePSOutput(output []byte, pids []int) (*types.ContainerProcessList, error) {
+	procList := &types.ContainerProcessList{}
+
+	lines := strings.Split(string(output), "\n")
+	procList.Titles = fieldsASCII(lines[0])
+
+	pidIndex := -1
+	for i, name := range procList.Titles {
+		if name == "PID" {
+			pidIndex = i
+		}
 	}
-	return nil
+	if pidIndex == -1 {
+		return nil, fmt.Errorf("Couldn't find PID field in ps output")
+	}
+
+	// loop through the output and extract the PID from each line
+	for _, line := range lines[1:] {
+		if len(line) == 0 {
+			continue
+		}
+		fields := fieldsASCII(line)
+		p, err := strconv.Atoi(fields[pidIndex])
+		if err != nil {
+			return nil, fmt.Errorf("Unexpected pid '%s': %s", fields[pidIndex], err)
+		}
+
+		for _, pid := range pids {
+			if pid == p {
+				// Make sure number of fields equals number of header titles
+				// merging "overhanging" fields
+				process := fields[:len(procList.Titles)-1]
+				process = append(process, strings.Join(fields[len(procList.Titles)-1:], " "))
+				procList.Processes = append(procList.Processes, process)
+			}
+		}
+	}
+	return procList, nil
 }

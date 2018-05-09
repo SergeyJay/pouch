@@ -105,6 +105,11 @@ func rootFSToAPIType(rootFs *v1.RootFS) types.ImageInfoRootFS {
 // ociImageToPouchImage transfer the image from OCI format to Pouch format.
 func ociImageToPouchImage(ociImage v1.Image) (types.ImageInfo, error) {
 	imageConfig := ociImage.Config
+
+	volumes := make(map[string]interface{})
+	for k, obj := range imageConfig.Volumes {
+		volumes[k] = obj
+	}
 	cfg := &types.ContainerConfig{
 		// TODO: add more fields
 		User:       imageConfig.User,
@@ -114,6 +119,7 @@ func ociImageToPouchImage(ociImage v1.Image) (types.ImageInfo, error) {
 		WorkingDir: imageConfig.WorkingDir,
 		Labels:     imageConfig.Labels,
 		StopSignal: imageConfig.StopSignal,
+		Volumes:    volumes,
 	}
 
 	rootFs := rootFSToAPIType(&ociImage.RootFS)
@@ -140,10 +146,13 @@ func toLinuxResources(resources types.Resources) (*specs.LinuxResources, error) 
 
 	// toLinuxCPU
 	shares := uint64(resources.CPUShares)
+	period := uint64(resources.CPUPeriod)
 	r.CPU = &specs.LinuxCPU{
 		Cpus:   resources.CpusetCpus,
 		Mems:   resources.CpusetMems,
 		Shares: &shares,
+		Period: &period,
+		Quota:  &resources.CPUQuota,
 	}
 
 	// toLinuxMemory
@@ -152,9 +161,10 @@ func toLinuxResources(resources types.Resources) (*specs.LinuxResources, error) 
 		swappiness = uint64(*(resources.MemorySwappiness))
 	}
 	r.Memory = &specs.LinuxMemory{
-		Limit:      &resources.Memory,
-		Swap:       &resources.MemorySwap,
-		Swappiness: &swappiness,
+		Limit:       &resources.Memory,
+		Swap:        &resources.MemorySwap,
+		Swappiness:  &swappiness,
+		Reservation: &resources.MemoryReservation,
 	}
 
 	// TODO: add more fields.

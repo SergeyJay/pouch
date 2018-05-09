@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/alibaba/pouch/apis/types"
+
 	"github.com/spf13/cobra"
 )
 
@@ -52,6 +54,8 @@ func (rc *RunCommand) addFlags() {
 	flagSet.BoolVarP(&rc.attach, "attach", "a", false, "Attach container's STDOUT and STDERR")
 	flagSet.BoolVarP(&rc.stdin, "interactive", "i", false, "Attach container's STDIN")
 	flagSet.BoolVarP(&rc.detach, "detach", "d", false, "Run container in background and print container ID")
+	flagSet.BoolVar(&rc.rm, "rm", false, "Automatically remove the container after it exits")
+
 }
 
 // runRun is the entry of run command.
@@ -66,6 +70,7 @@ func (rc *RunCommand) runRun(args []string) error {
 		config.Cmd = args[1:]
 	}
 	containerName := rc.name
+	config.ContainerConfig.OpenStdin = rc.stdin
 
 	ctx := context.Background()
 	apiClient := rc.cli.Client()
@@ -85,6 +90,9 @@ func (rc *RunCommand) runRun(args []string) error {
 	if (rc.attach || rc.stdin) && rc.detach {
 		return fmt.Errorf("Conflicting options: -a (or -i) and -d")
 	}
+	if rc.rm && rc.detach {
+		return fmt.Errorf("Conflicting options: --rm and -d")
+	}
 
 	// default attach container's stdout and stderr
 	if !rc.detach {
@@ -94,20 +102,23 @@ func (rc *RunCommand) runRun(args []string) error {
 	wait := make(chan struct{})
 
 	if rc.attach || rc.stdin {
-		in, out, err := setRawMode(rc.stdin, false)
-		if err != nil {
-			return fmt.Errorf("failed to set raw mode")
-		}
-		defer func() {
-			if err := restoreMode(in, out); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to restore term mode")
+		if rc.tty {
+			in, out, err := setRawMode(rc.stdin, false)
+			if err != nil {
+				return fmt.Errorf("failed to set raw mode")
 			}
-		}()
+			defer func() {
+				if err := restoreMode(in, out); err != nil {
+					fmt.Fprintf(os.Stderr, "failed to restore term mode")
+				}
+			}()
+		}
 
 		conn, br, err := apiClient.ContainerAttach(ctx, containerName, rc.stdin)
 		if err != nil {
 			return fmt.Errorf("failed to attach container: %v", err)
 		}
+		defer conn.Close()
 
 		go func() {
 			io.Copy(os.Stdout, br)
@@ -115,7 +126,6 @@ func (rc *RunCommand) runRun(args []string) error {
 		}()
 		go func() {
 			io.Copy(conn, os.Stdin)
-			wait <- struct{}{}
 		}()
 	}
 
@@ -130,6 +140,23 @@ func (rc *RunCommand) runRun(args []string) error {
 	} else {
 		fmt.Fprintf(os.Stdout, "%s\n", result.ID)
 	}
+
+	info, err := apiClient.ContainerGet(ctx, containerName)
+	if err != nil {
+		return err
+	}
+
+	if rc.rm {
+		if err := apiClient.ContainerRemove(ctx, containerName, &types.ContainerRemoveOptions{Force: true}); err != nil {
+			return fmt.Errorf("failed to remove container %s: %v", containerName, err)
+		}
+	}
+
+	code := info.State.ExitCode
+	if code != 0 {
+		return ExitError{Code: int(code)}
+	}
+
 	return nil
 }
 

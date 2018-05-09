@@ -61,11 +61,14 @@ type Resources struct {
 	// CPU CFS (Completely Fair Scheduler) period.
 	// The length of a CPU period in microseconds.
 	//
+	// Maximum: 1e+06
+	// Minimum: 1000
 	CPUPeriod int64 `json:"CpuPeriod,omitempty"`
 
 	// CPU CFS (Completely Fair Scheduler) quota.
 	// Microseconds of CPU time that the container can get in a CPU period."
 	//
+	// Minimum: 1000
 	CPUQuota int64 `json:"CpuQuota,omitempty"`
 
 	// The length of a CPU real-time period in microseconds. Set to 0 to allocate no time allocated to real-time tasks.
@@ -88,9 +91,6 @@ type Resources struct {
 
 	// A list of devices to add to the container.
 	Devices []*DeviceMapping `json:"Devices"`
-
-	// Disk limit (in bytes).
-	DiskQuota int64 `json:"DiskQuota,omitempty"`
 
 	// Maximum IO in bytes per second for the container system drive (Windows only)
 	IOMaximumBandwidth uint64 `json:"IOMaximumBandwidth,omitempty"`
@@ -143,7 +143,7 @@ type Resources struct {
 	// Disable OOM Killer for the container.
 	OomKillDisable *bool `json:"OomKillDisable,omitempty"`
 
-	// Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this paramter support.
+	// Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this parameter support.
 	//
 	PidsLimit int64 `json:"PidsLimit,omitempty"`
 
@@ -154,7 +154,7 @@ type Resources struct {
 
 	// A list of resource limits to set in the container. For example: `{"Name": "nofile", "Soft": 1024, "Hard": 2048}`"
 	//
-	Ulimits []*ResourcesUlimitsItems0 `json:"Ulimits"`
+	Ulimits []*Ulimit `json:"Ulimits"`
 }
 
 /* polymorph Resources BlkioDeviceReadBps false */
@@ -192,8 +192,6 @@ type Resources struct {
 /* polymorph Resources DeviceCgroupRules false */
 
 /* polymorph Resources Devices false */
-
-/* polymorph Resources DiskQuota false */
 
 /* polymorph Resources IOMaximumBandwidth false */
 
@@ -257,6 +255,16 @@ func (m *Resources) Validate(formats strfmt.Registry) error {
 	}
 
 	if err := m.validateBlkioWeightDevice(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := m.validateCPUPeriod(formats); err != nil {
+		// prop
+		res = append(res, err)
+	}
+
+	if err := m.validateCPUQuota(formats); err != nil {
 		// prop
 		res = append(res, err)
 	}
@@ -459,6 +467,36 @@ func (m *Resources) validateBlkioWeightDevice(formats strfmt.Registry) error {
 	return nil
 }
 
+func (m *Resources) validateCPUPeriod(formats strfmt.Registry) error {
+
+	if swag.IsZero(m.CPUPeriod) { // not required
+		return nil
+	}
+
+	if err := validate.MinimumInt("CpuPeriod", "body", int64(m.CPUPeriod), 1000, false); err != nil {
+		return err
+	}
+
+	if err := validate.MaximumInt("CpuPeriod", "body", int64(m.CPUPeriod), 1e+06, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *Resources) validateCPUQuota(formats strfmt.Registry) error {
+
+	if swag.IsZero(m.CPUQuota) { // not required
+		return nil
+	}
+
+	if err := validate.MinimumInt("CpuQuota", "body", int64(m.CPUQuota), 1000, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (m *Resources) validateDeviceCgroupRules(formats strfmt.Registry) error {
 
 	if swag.IsZero(m.DeviceCgroupRules) { // not required
@@ -618,55 +656,6 @@ func (m *Resources) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary interface implementation
 func (m *Resources) UnmarshalBinary(b []byte) error {
 	var res Resources
-	if err := swag.ReadJSON(b, &res); err != nil {
-		return err
-	}
-	*m = res
-	return nil
-}
-
-// ResourcesUlimitsItems0 resources ulimits items0
-// swagger:model ResourcesUlimitsItems0
-
-type ResourcesUlimitsItems0 struct {
-
-	// Hard limit
-	Hard int64 `json:"Hard,omitempty"`
-
-	// Name of ulimit
-	Name string `json:"Name,omitempty"`
-
-	// Soft limit
-	Soft int64 `json:"Soft,omitempty"`
-}
-
-/* polymorph ResourcesUlimitsItems0 Hard false */
-
-/* polymorph ResourcesUlimitsItems0 Name false */
-
-/* polymorph ResourcesUlimitsItems0 Soft false */
-
-// Validate validates this resources ulimits items0
-func (m *ResourcesUlimitsItems0) Validate(formats strfmt.Registry) error {
-	var res []error
-
-	if len(res) > 0 {
-		return errors.CompositeValidationError(res...)
-	}
-	return nil
-}
-
-// MarshalBinary interface implementation
-func (m *ResourcesUlimitsItems0) MarshalBinary() ([]byte, error) {
-	if m == nil {
-		return nil, nil
-	}
-	return swag.WriteJSON(m)
-}
-
-// UnmarshalBinary interface implementation
-func (m *ResourcesUlimitsItems0) UnmarshalBinary(b []byte) error {
-	var res ResourcesUlimitsItems0
 	if err := swag.ReadJSON(b, &res); err != nil {
 		return err
 	}

@@ -16,16 +16,18 @@ import (
 
 	"github.com/go-openapi/strfmt"
 	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 func (s *Server) removeContainers(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	name := mux.Vars(req)["name"]
 
-	option := &mgr.ContainerRemoveOption{
-		Force: httputils.BoolValue(req, "force"),
-		// TODO Volume and Link will be supported in the future.
-		Volume: httputils.BoolValue(req, "v"),
-		Link:   httputils.BoolValue(req, "link"),
+	option := &types.ContainerRemoveOptions{
+		Force:   httputils.BoolValue(req, "force"),
+		Volumes: httputils.BoolValue(req, "v"),
+		// TODO: Link will be supported in the future.
+		Link: httputils.BoolValue(req, "link"),
 	}
 
 	if err := s.ContainerMgr.Remove(ctx, name, option); err != nil {
@@ -37,10 +39,32 @@ func (s *Server) removeContainers(ctx context.Context, rw http.ResponseWriter, r
 }
 
 func (s *Server) renameContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
-	oldName := mux.Vars(req)["id"]
+	oldName := mux.Vars(req)["name"]
 	newName := req.FormValue("name")
 
 	if err := s.ContainerMgr.Rename(ctx, oldName, newName); err != nil {
+		return err
+	}
+
+	rw.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *Server) restartContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	var (
+		t   int
+		err error
+	)
+
+	if v := req.FormValue("t"); v != "" {
+		if t, err = strconv.Atoi(v); err != nil {
+			return httputils.NewHTTPError(err, http.StatusBadRequest)
+		}
+	}
+
+	name := mux.Vars(req)["name"]
+
+	if err = s.ContainerMgr.Restart(ctx, name, int64(t)); err != nil {
 		return err
 	}
 
@@ -107,10 +131,27 @@ func (s *Server) startContainerExec(ctx context.Context, rw http.ResponseWriter,
 	return s.ContainerMgr.StartExec(ctx, name, config, attach)
 }
 
+func (s *Server) getExecInfo(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	name := mux.Vars(req)["name"]
+	execInfo, err := s.ContainerMgr.InspectExec(ctx, name)
+	if err != nil {
+		return err
+	}
+	return EncodeResponse(rw, http.StatusOK, execInfo)
+}
+
 func (s *Server) createContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	config := &types.ContainerCreateConfig{}
+	reader := req.Body
+	var ex error
+	if s.ContainerPlugin != nil {
+		logrus.Infof("invoke container pre-create hook in plugin")
+		if reader, ex = s.ContainerPlugin.PreCreate(req.Body); ex != nil {
+			return errors.Wrapf(ex, "pre-create plugin point execute failed")
+		}
+	}
 	// decode request body
-	if err := json.NewDecoder(req.Body).Decode(config); err != nil {
+	if err := json.NewDecoder(reader).Decode(config); err != nil {
 		return httputils.NewHTTPError(err, http.StatusBadRequest)
 	}
 	// validate request body
@@ -137,11 +178,11 @@ func (s *Server) createContainer(ctx context.Context, rw http.ResponseWriter, re
 }
 
 func (s *Server) startContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
-	id := mux.Vars(req)["name"]
+	name := mux.Vars(req)["name"]
 
 	detachKeys := req.FormValue("detachKeys")
 
-	if err := s.ContainerMgr.Start(ctx, id, detachKeys); err != nil {
+	if err := s.ContainerMgr.Start(ctx, name, detachKeys); err != nil {
 		return err
 	}
 
@@ -267,25 +308,36 @@ func (s *Server) getContainers(ctx context.Context, rw http.ResponseWriter, req 
 
 func (s *Server) getContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	name := mux.Vars(req)["name"]
+
 	meta, err := s.ContainerMgr.Get(ctx, name)
 	if err != nil {
 		return err
 	}
 
 	container := types.ContainerJSON{
-		ID:         meta.ID,
-		Name:       meta.Name,
-		Image:      meta.Config.Image,
-		Created:    meta.Created,
-		State:      meta.State,
-		Config:     meta.Config,
-		HostConfig: meta.HostConfig,
+		ID:          meta.ID,
+		Name:        meta.Name,
+		Image:       meta.Config.Image,
+		Created:     meta.Created,
+		State:       meta.State,
+		Config:      meta.Config,
+		HostConfig:  meta.HostConfig,
+		Snapshotter: meta.Snapshotter,
+		GraphDriver: &types.GraphDriverData{
+			Name: meta.Snapshotter.Name,
+			Data: meta.Snapshotter.Data,
+		},
 	}
 
 	if meta.NetworkSettings != nil {
 		container.NetworkSettings = &types.NetworkSettings{
 			Networks: meta.NetworkSettings.Networks,
 		}
+	}
+
+	container.Mounts = []types.MountPoint{}
+	for _, mp := range meta.Mounts {
+		container.Mounts = append(container.Mounts, *mp)
 	}
 
 	return EncodeResponse(rw, http.StatusOK, container)
@@ -306,6 +358,71 @@ func (s *Server) updateContainer(ctx context.Context, rw http.ResponseWriter, re
 
 	if err := s.ContainerMgr.Update(ctx, name, config); err != nil {
 		return httputils.NewHTTPError(err, http.StatusInternalServerError)
+	}
+
+	rw.WriteHeader(http.StatusOK)
+	return nil
+}
+
+func (s *Server) upgradeContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	config := &types.ContainerUpgradeConfig{}
+	// decode request body
+	if err := json.NewDecoder(req.Body).Decode(config); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+	// validate request body
+	if err := config.Validate(strfmt.NewFormats()); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+
+	name := mux.Vars(req)["name"]
+
+	if err := s.ContainerMgr.Upgrade(ctx, name, config); err != nil {
+		return err
+	}
+
+	rw.WriteHeader(http.StatusOK)
+	return nil
+}
+
+func (s *Server) topContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	name := mux.Vars(req)["name"]
+
+	procList, err := s.ContainerMgr.Top(ctx, name, req.Form.Get("ps_args"))
+	if err != nil {
+		return err
+	}
+
+	return EncodeResponse(rw, http.StatusOK, procList)
+}
+
+func (s *Server) logsContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	//opts := &types.ContainerLogsOptions{}
+
+	// TODO
+	return nil
+}
+
+func (s *Server) resizeContainer(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	height, err := strconv.Atoi(req.FormValue("h"))
+	if err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+
+	width, err := strconv.Atoi(req.FormValue("w"))
+	if err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+
+	opts := types.ResizeOptions{
+		Height: int64(height),
+		Width:  int64(width),
+	}
+
+	name := mux.Vars(req)["name"]
+
+	if err := s.ContainerMgr.Resize(ctx, name, opts); err != nil {
+		return err
 	}
 
 	rw.WriteHeader(http.StatusOK)

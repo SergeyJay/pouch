@@ -14,21 +14,24 @@ pouch volume list
 
 ```
 $ pouch volume list
-Name:
-pouch-volume-1
-pouch-volume-2
-pouch-volume-3
+DRIVER   VOLUME NAME
+local    pouch-volume-1
+local    pouch-volume-2
+local    pouch-volume-3
 ```
 
 ### Options
 
 ```
-  -h, --help   help for list
+  -h, --help         help for list
+      --mountpoint   Display volume mountpoint
+      --size         Display volume size
 ```
 
 ### Options inherited from parent commands
 
 ```
+  -D, --debug              Switch client log level to DEBUG mode
   -H, --host string        Specify connecting address of Pouch CLI (default "unix:///var/run/pouchd.sock")
       --tlscacert string   Specify CA file of TLS
       --tlscert string     Specify cert file of TLS

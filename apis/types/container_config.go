@@ -35,11 +35,14 @@ type ContainerConfig struct {
 	// Command to run specified an array of strings.
 	Cmd []string `json:"Cmd"`
 
+	// Set disk quota for container
+	DiskQuota map[string]string `json:"DiskQuota,omitempty"`
+
 	// The domain name to use for the container.
 	Domainname string `json:"Domainname,omitempty"`
 
 	// The entry point for the container as a string or an array of strings.
-	// If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default (i.e., the entry point used by pouch when there is no `ENTRYPOINT` instruction in the `Dockerfile`).
+	// If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default.
 	//
 	Entrypoint []string `json:"Entrypoint"`
 
@@ -70,11 +73,14 @@ type ContainerConfig struct {
 	// Disable networking for the container.
 	NetworkDisabled bool `json:"NetworkDisabled,omitempty"`
 
-	// `ONBUILD` metadata that were defined in the image's `Dockerfile`.
+	// `ONBUILD` metadata that were defined.
 	OnBuild []string `json:"OnBuild"`
 
 	// Open `stdin`
 	OpenStdin bool `json:"OpenStdin,omitempty"`
+
+	// set disk quota by specified quota id, if id < 0, it means pouchd alloc a unique quota id
+	QuotaID string `json:"QuotaID,omitempty"`
 
 	// Whether to start container in rich container mode. (default false)
 	Rich bool `json:"Rich,omitempty"`
@@ -84,6 +90,9 @@ type ContainerConfig struct {
 
 	// Shell for when `RUN`, `CMD`, and `ENTRYPOINT` uses a shell.
 	Shell []string `json:"Shell"`
+
+	// annotations send to runtime spec.
+	SpecAnnotation map[string]string `json:"SpecAnnotation,omitempty"`
 
 	// Close `stdin` after one attached client disconnects
 	StdinOnce bool `json:"StdinOnce,omitempty"`
@@ -117,6 +126,8 @@ type ContainerConfig struct {
 
 /* polymorph ContainerConfig Cmd false */
 
+/* polymorph ContainerConfig DiskQuota false */
+
 /* polymorph ContainerConfig Domainname false */
 
 /* polymorph ContainerConfig Entrypoint false */
@@ -141,11 +152,15 @@ type ContainerConfig struct {
 
 /* polymorph ContainerConfig OpenStdin false */
 
+/* polymorph ContainerConfig QuotaID false */
+
 /* polymorph ContainerConfig Rich false */
 
 /* polymorph ContainerConfig RichMode false */
 
 /* polymorph ContainerConfig Shell false */
+
+/* polymorph ContainerConfig SpecAnnotation false */
 
 /* polymorph ContainerConfig StdinOnce false */
 

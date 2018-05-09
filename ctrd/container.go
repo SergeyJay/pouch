@@ -3,6 +3,7 @@ package ctrd
 import (
 	"context"
 	"fmt"
+	"io"
 	"runtime"
 	"syscall"
 	"time"
@@ -12,10 +13,11 @@ import (
 	"github.com/alibaba/pouch/pkg/errtypes"
 
 	"github.com/containerd/containerd"
-	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/errdefs"
+	"github.com/containerd/containerd/leases"
 	"github.com/containerd/containerd/linux/runctypes"
 	"github.com/containerd/containerd/oci"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -25,11 +27,14 @@ var (
 )
 
 type containerPack struct {
-	id            string
-	ch            chan *Message
-	sch           <-chan containerd.ExitStatus
-	container     containerd.Container
-	task          containerd.Task
+	id        string
+	ch        chan *Message
+	sch       <-chan containerd.ExitStatus
+	container containerd.Container
+	task      containerd.Task
+
+	// client is to record which stream client the container connect with
+	client        *WrapperClient
 	skipStopHooks bool
 }
 
@@ -40,14 +45,17 @@ func (c *Client) ExecContainer(ctx context.Context, process *Process) error {
 		return err
 	}
 
-	// create io
-	// var io containerd.IOCreation
-	var io cio.Creation
-	if process.P.Terminal {
-		io = cio.NewIOWithTerminal(process.IO.Stdin, process.IO.Stdout, process.IO.Stderr, true)
-	} else {
-		io = cio.NewIO(process.IO.Stdin, process.IO.Stdout, process.IO.Stderr)
+	var (
+		pStdout io.Writer = process.IO.Stdout
+		pStderr io.Writer = process.IO.Stderr
+	)
+
+	if !process.P.Terminal && !process.IO.MuxDisabled {
+		pStdout = stdcopy.NewStdWriter(pStdout, stdcopy.Stdout)
+		pStderr = stdcopy.NewStdWriter(pStderr, stdcopy.Stderr)
 	}
+
+	io := containerio.NewIOWithTerminal(process.IO.Stdin, pStdout, pStderr, process.P.Terminal, process.IO.Stdin != nil)
 
 	// create exec process in container
 	execProcess, err := pack.task.Exec(ctx, process.ExecID, process.P, io)
@@ -81,6 +89,11 @@ func (c *Client) ExecContainer(ctx context.Context, process *Process) error {
 				break
 			}
 		}
+
+		// delete the finished exec process in containerd
+		if _, err := execProcess.Delete(context.TODO()); err != nil {
+			logrus.Warnf("failed to delete exec process %s: %s", process.ExecID, err)
+		}
 	}()
 
 	// start the exec process
@@ -103,6 +116,11 @@ func (c *Client) ContainerPID(ctx context.Context, id string) (int, error) {
 
 // ContainerPIDs returns the all processes's ids inside the container.
 func (c *Client) ContainerPIDs(ctx context.Context, id string) ([]int, error) {
+	if !c.lock.Trylock(id) {
+		return nil, errtypes.ErrLockfailed
+	}
+	defer c.lock.Unlock(id)
+
 	pack, err := c.watch.get(id)
 	if err != nil {
 		return nil, err
@@ -144,12 +162,17 @@ func (c *Client) ProbeContainer(ctx context.Context, id string, timeout time.Dur
 
 // RecoverContainer reload the container from metadata and watch it, if program be restarted.
 func (c *Client) RecoverContainer(ctx context.Context, id string, io *containerio.IO) error {
+	wrapperCli, err := c.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get a containerd grpc client: %v", err)
+	}
+
 	if !c.lock.Trylock(id) {
 		return errtypes.ErrLockfailed
 	}
 	defer c.lock.Unlock(id)
 
-	lc, err := c.client.LoadContainer(ctx, id)
+	lc, err := wrapperCli.client.LoadContainer(ctx, id)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return errors.Wrap(errtypes.ErrNotfound, "container")
@@ -157,7 +180,7 @@ func (c *Client) RecoverContainer(ctx context.Context, id string, io *containeri
 		return errors.Wrap(err, "failed to load container")
 	}
 
-	task, err := lc.Task(ctx, cio.WithAttach(io.Stdin, io.Stdout, io.Stderr))
+	task, err := lc.Task(ctx, containerio.WithAttach(io.Stdin, io.Stdout, io.Stderr))
 	if err != nil {
 		if !errdefs.IsNotFound(err) {
 			return errors.Wrap(err, "failed to get task")
@@ -171,11 +194,13 @@ func (c *Client) RecoverContainer(ctx context.Context, id string, io *containeri
 	if err != nil {
 		return errors.Wrap(err, "failed to wait task")
 	}
+
 	c.watch.add(&containerPack{
 		id:        id,
 		container: lc,
 		task:      task,
 		ch:        make(chan *Message, 1),
+		client:    wrapperCli,
 		sch:       statusCh,
 	})
 
@@ -185,6 +210,16 @@ func (c *Client) RecoverContainer(ctx context.Context, id string, io *containeri
 
 // DestroyContainer kill container and delete it.
 func (c *Client) DestroyContainer(ctx context.Context, id string, timeout int64) (*Message, error) {
+	// TODO(ziren): if we just want to stop a container,
+	// we may need lease to lock the snapshot of container,
+	// in case, it be deleted by gc.
+	wrapperCli, err := c.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get a containerd grpc client: %v", err)
+	}
+
+	ctx = leases.WithLease(ctx, wrapperCli.lease.ID())
+
 	if !c.lock.Trylock(id) {
 		return nil, errtypes.ErrLockfailed
 	}
@@ -305,8 +340,13 @@ func (c *Client) CreateContainer(ctx context.Context, container *Container) erro
 }
 
 func (c *Client) createContainer(ctx context.Context, ref, id string, container *Container) (err0 error) {
+	wrapperCli, err := c.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get a containerd grpc client: %v", err)
+	}
+
 	// get image
-	img, err := c.client.GetImage(ctx, ref)
+	img, err := wrapperCli.client.GetImage(ctx, ref)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
 			return errors.Wrap(errtypes.ErrNotfound, "image")
@@ -339,14 +379,15 @@ func (c *Client) createContainer(ctx context.Context, ref, id string, container 
 	}
 	options = append(options, containerd.WithSnapshot(id))
 
-	nc, err := c.client.NewContainer(ctx, id, options...)
+	nc, err := wrapperCli.client.NewContainer(ctx, id, options...)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create container, id: %s", id)
 	}
 
 	defer func() {
 		if err0 != nil {
-			nc.Delete(ctx, containerd.WithSnapshotCleanup)
+			// Delete snapshot when start failed, may cause data lost.
+			nc.Delete(ctx)
 		}
 	}()
 
@@ -358,6 +399,9 @@ func (c *Client) createContainer(ctx context.Context, ref, id string, container 
 		return err
 	}
 
+	// add grpc client to pack struct
+	pack.client = wrapperCli
+
 	c.watch.add(pack)
 
 	return nil
@@ -366,12 +410,7 @@ func (c *Client) createContainer(ctx context.Context, ref, id string, container 
 func (c *Client) createTask(ctx context.Context, id string, container containerd.Container, cc *Container) (p *containerPack, err0 error) {
 	var pack *containerPack
 
-	var io cio.Creation
-	if cc.Spec.Process.Terminal {
-		io = cio.NewIOWithTerminal(cc.IO.Stdin, cc.IO.Stdout, cc.IO.Stderr, true)
-	} else {
-		io = cio.NewIO(cc.IO.Stdin, cc.IO.Stdout, cc.IO.Stderr)
-	}
+	io := containerio.NewIOWithTerminal(cc.IO.Stdin, cc.IO.Stdout, cc.IO.Stderr, cc.Spec.Process.Terminal, cc.IO.Stdin != nil)
 
 	// create task
 	task, err := container.NewTask(ctx, io)
@@ -411,7 +450,12 @@ func (c *Client) createTask(ctx context.Context, id string, container containerd
 }
 
 func (c *Client) listContainerStore(ctx context.Context) ([]string, error) {
-	containers, err := c.client.ContainerService().List(ctx)
+	wrapperCli, err := c.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get a containerd grpc client: %v", err)
+	}
+
+	containers, err := wrapperCli.client.ContainerService().List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -443,4 +487,20 @@ func (c *Client) UpdateResources(ctx context.Context, id string, resources types
 	}
 
 	return pack.task.Update(ctx, containerd.WithResources(r))
+}
+
+// ResizeContainer changes the size of the TTY of the init process running
+// in the container to the given height and width.
+func (c *Client) ResizeContainer(ctx context.Context, id string, opts types.ResizeOptions) error {
+	if !c.lock.Trylock(id) {
+		return errtypes.ErrLockfailed
+	}
+	defer c.lock.Unlock(id)
+
+	pack, err := c.watch.get(id)
+	if err != nil {
+		return err
+	}
+
+	return pack.task.Resize(ctx, uint32(opts.Height), uint32(opts.Width))
 }

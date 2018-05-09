@@ -43,9 +43,9 @@ func (s *Server) listNetwork(ctx context.Context, rw http.ResponseWriter, req *h
 		return err
 	}
 
-	respNetworks := types.NetworkListResp{Networks: []*types.NetworkInfo{}, Warnings: nil}
+	respNetworks := []types.NetworkResource{}
 	for _, net := range networks {
-		respNetworks.Networks = append(respNetworks.Networks, &types.NetworkInfo{
+		respNetworks = append(respNetworks, types.NetworkResource{
 			Name:   net.Name,
 			ID:     net.ID,
 			Driver: net.Type,
@@ -55,9 +55,9 @@ func (s *Server) listNetwork(ctx context.Context, rw http.ResponseWriter, req *h
 }
 
 func (s *Server) getNetwork(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
-	name := mux.Vars(req)["name"]
+	id := mux.Vars(req)["id"]
 
-	network, err := s.NetworkMgr.Get(ctx, name)
+	network, err := s.NetworkMgr.Get(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -68,13 +68,49 @@ func (s *Server) getNetwork(ctx context.Context, rw http.ResponseWriter, req *ht
 }
 
 func (s *Server) deleteNetwork(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
-	name := mux.Vars(req)["name"]
+	id := mux.Vars(req)["id"]
 
-	if err := s.NetworkMgr.Remove(ctx, name); err != nil {
+	if err := s.NetworkMgr.Remove(ctx, id); err != nil {
 		return err
 	}
 	rw.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+func (s *Server) connectToNetwork(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	networkIDOrName := mux.Vars(req)["id"]
+	connectConfig := &types.NetworkConnect{}
+
+	// decode request body
+	if err := json.NewDecoder(req.Body).Decode(connectConfig); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+	// validate request body
+	if err := connectConfig.Validate(strfmt.NewFormats()); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+
+	if err := s.ContainerMgr.Connect(ctx, connectConfig.Container, networkIDOrName, connectConfig.EndpointConfig); err != nil {
+		return err
+	}
+	rw.WriteHeader(http.StatusOK)
+	return nil
+}
+
+func (s *Server) disconnectNetwork(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	network := &types.NetworkDisconnect{}
+	// decode request body
+	if err := json.NewDecoder(req.Body).Decode(network); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+	// validate request body
+	if err := network.Validate(strfmt.NewFormats()); err != nil {
+		return httputils.NewHTTPError(err, http.StatusBadRequest)
+	}
+
+	id := mux.Vars(req)["id"]
+
+	return s.ContainerMgr.Disconnect(ctx, network.Container, id, network.Force)
 }
 
 func buildNetworkInspectResp(n *networktypes.Network) *types.NetworkInspectResp {

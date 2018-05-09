@@ -17,8 +17,6 @@ function pre()
 {
     mkdir -p $BUILDPATH
 
-    git submodule update --init
-
     mkdir -p $BUILDPATH/src/github.com/docker
     [ -L $BUILDPATH/src/github.com/docker/libnetwork ] && rm -f $BUILDPATH/src/github.com/docker/libnetwork
     ln -s $DIR/extra/libnetwork $BUILDPATH/src/github.com/docker/libnetwork
@@ -32,7 +30,7 @@ function server()
 {
     cd $BUILDPATH/src/github.com/alibaba/pouch
     echo "GOOS=linux $GOBUILD -o $BINARY_NAME"
-    GOOS=linux $GOBUILD -o $BINARY_NAME
+    GOOS=linux $GOBUILD -o $BINARY_NAME -tags 'selinux'
 }
 
 function client()

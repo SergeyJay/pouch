@@ -2,17 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"runtime"
 	"strings"
 
 	"github.com/alibaba/pouch/apis/types"
 	"github.com/alibaba/pouch/test/command"
 	"github.com/alibaba/pouch/test/environment"
+	"github.com/alibaba/pouch/test/util"
+
 	"github.com/go-check/check"
 	"github.com/gotestyourself/gotestyourself/icmd"
+	digest "github.com/opencontainers/go-digest"
 )
 
-// PouchCreateSuite is the test suite fo help CLI.
+// PouchCreateSuite is the test suite for create CLI.
 type PouchCreateSuite struct{}
 
 func init() {
@@ -25,24 +29,25 @@ func (suite *PouchCreateSuite) SetUpSuite(c *check.C) {
 
 	environment.PruneAllContainers(apiClient)
 
-	command.PouchRun("pull", busyboxImage).Assert(c, icmd.Success)
+	PullImage(c, busyboxImage)
 }
 
 // TearDownTest does cleanup work in the end of each test.
 func (suite *PouchCreateSuite) TearDownTest(c *check.C) {
 }
 
-// TestCreateName is to verify the correctness of creating contaier with specified name.
+// TestCreateName is to verify the correctness of creating container with specified name.
 func (suite *PouchCreateSuite) TestCreateName(c *check.C) {
 	name := "create-normal"
 	res := command.PouchRun("create", "--name", name, busyboxImage)
 
 	res.Assert(c, icmd.Success)
-	if out := res.Combined(); !strings.Contains(out, name) {
-		c.Fatalf("unexpected output %s expected %s\n", out, name)
-	}
 
-	defer command.PouchRun("rm", "-f", name)
+	// create command should add newline at the end of result
+	digStr := strings.TrimSpace(res.Combined())
+	c.Assert(res.Combined(), check.Equals, fmt.Sprintf("%s\n", digStr))
+
+	defer DelContainerForceMultyTime(c, name)
 }
 
 // TestCreateNameByImageID is to verify the correctness of creating contaier with specified name by image id.
@@ -56,11 +61,12 @@ func (suite *PouchCreateSuite) TestCreateNameByImageID(c *check.C) {
 	res = command.PouchRun("create", "--name", name, imageID)
 
 	res.Assert(c, icmd.Success)
-	if out := res.Combined(); !strings.Contains(out, name) {
-		c.Fatalf("unexpected output %s expected %s\n", out, name)
-	}
 
-	defer command.PouchRun("rm", "-f", name)
+	digHexStr := strings.TrimSpace(res.Combined())
+	_, err := digest.Parse(fmt.Sprintf("%s:%s", digest.SHA256, digHexStr))
+	c.Assert(err, check.IsNil)
+
+	DelContainerForceMultyTime(c, name)
 }
 
 // TestCreateDuplicateContainerName is to verify duplicate container names.
@@ -70,7 +76,7 @@ func (suite *PouchCreateSuite) TestCreateDuplicateContainerName(c *check.C) {
 	res := command.PouchRun("create", "--name", name, busyboxImage)
 	res.Assert(c, icmd.Success)
 
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	res = command.PouchRun("create", "--name", name, busyboxImage)
 	c.Assert(res.Error, check.NotNil)
@@ -88,7 +94,7 @@ func (suite *PouchCreateSuite) TestCreateWithArgs(c *check.C) {
 	res := command.PouchRun("create", "--name", name, busyboxImage, "/bin/ls")
 	res.Assert(c, icmd.Success)
 
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 }
 
 // TestCreateWithTTY is to verify tty flag.
@@ -99,7 +105,7 @@ func (suite *PouchCreateSuite) TestCreateWithTTY(c *check.C) {
 	res := command.PouchRun("create", "-t", "--name", name, busyboxImage)
 	res.Assert(c, icmd.Success)
 
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 }
 
 // TestPouchCreateVolume is to verify volume flag.
@@ -116,7 +122,7 @@ func (suite *PouchCreateSuite) TestPouchCreateVolume(c *check.C) {
 	res := command.PouchRun("create", "-v /tmp:/tmp", "--name", funcname, busyboxImage)
 	res.Assert(c, icmd.Success)
 
-	defer command.PouchRun("rm", "-f", funcname)
+	defer DelContainerForceMultyTime(c, funcname)
 }
 
 // TestCreateInWrongWay tries to run create in wrong way.
@@ -142,17 +148,17 @@ func (suite *PouchCreateSuite) TestCreateWithLabels(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "-l", label, busyboxImage)
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.Config.Labels, check.NotNil)
+	c.Assert(result[0].Config.Labels, check.NotNil)
 
-	if result.Config.Labels["abc"] != "123" {
+	if result[0].Config.Labels["abc"] != "123" {
 		c.Errorf("failed to set label: %s", label)
 	}
 }
@@ -164,17 +170,17 @@ func (suite *PouchCreateSuite) TestCreateWithSysctls(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "--sysctl", sysctl, busyboxImage)
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.HostConfig.Sysctls, check.NotNil)
+	c.Assert(result[0].HostConfig.Sysctls, check.NotNil)
 
-	if result.HostConfig.Sysctls["net.ipv4.ip_forward"] != "1" {
+	if result[0].HostConfig.Sysctls["net.ipv4.ip_forward"] != "1" {
 		c.Errorf("failed to set sysctl: %s", sysctl)
 	}
 }
@@ -186,18 +192,18 @@ func (suite *PouchCreateSuite) TestCreateWithAppArmor(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "--security-opt", appArmor, busyboxImage)
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.HostConfig.SecurityOpt, check.NotNil)
+	c.Assert(result[0].HostConfig.SecurityOpt, check.NotNil)
 
 	exist := false
-	for _, opt := range result.HostConfig.SecurityOpt {
+	for _, opt := range result[0].HostConfig.SecurityOpt {
 		if opt == appArmor {
 			exist = true
 		}
@@ -214,18 +220,18 @@ func (suite *PouchCreateSuite) TestCreateWithSeccomp(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "--security-opt", seccomp, busyboxImage)
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.HostConfig.SecurityOpt, check.NotNil)
+	c.Assert(result[0].HostConfig.SecurityOpt, check.NotNil)
 
 	exist := false
-	for _, opt := range result.HostConfig.SecurityOpt {
+	for _, opt := range result[0].HostConfig.SecurityOpt {
 		if opt == seccomp {
 			exist = true
 		}
@@ -242,18 +248,18 @@ func (suite *PouchCreateSuite) TestCreateWithCapability(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "--cap-add", capability, busyboxImage, "brctl", "addbr", "foobar")
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.HostConfig.CapAdd, check.NotNil)
+	c.Assert(result[0].HostConfig.CapAdd, check.NotNil)
 
 	exist := false
-	for _, cap := range result.HostConfig.CapAdd {
+	for _, cap := range result[0].HostConfig.CapAdd {
 		if cap == capability {
 			exist = true
 		}
@@ -269,15 +275,15 @@ func (suite *PouchCreateSuite) TestCreateWithPrivilege(c *check.C) {
 
 	res := command.PouchRun("create", "--name", name, "--privileged", busyboxImage, "brctl", "addbr", "foobar")
 	res.Assert(c, icmd.Success)
-	defer command.PouchRun("rm", "-f", name)
+	defer DelContainerForceMultyTime(c, name)
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.HostConfig.Privileged, check.Equals, true)
+	c.Assert(result[0].HostConfig.Privileged, check.Equals, true)
 }
 
 // TestCreateEnableLxcfs tries to test create a container with lxcfs.
@@ -289,13 +295,13 @@ func (suite *PouchCreateSuite) TestCreateEnableLxcfs(c *check.C) {
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.HostConfig.EnableLxcfs, check.NotNil)
+	c.Assert(result[0].HostConfig.EnableLxcfs, check.NotNil)
 
-	if result.HostConfig.EnableLxcfs != true {
+	if result[0].HostConfig.EnableLxcfs != true {
 		c.Errorf("failed to set EnableLxcfs")
 	}
 }
@@ -309,13 +315,13 @@ func (suite *PouchCreateSuite) TestCreateWithEnv(c *check.C) {
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
 
 	ok := false
-	for _, v := range result.Config.Env {
+	for _, v := range result[0].Config.Env {
 		if strings.Contains(v, "TEST=true") {
 			ok = true
 		}
@@ -332,11 +338,11 @@ func (suite *PouchCreateSuite) TestCreateWithWorkDir(c *check.C) {
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(strings.TrimSpace(result.Config.WorkingDir), check.Equals, "/tmp/test")
+	c.Assert(strings.TrimSpace(result[0].Config.WorkingDir), check.Equals, "/tmp/test")
 
 	// TODO: check the work directory has been created.
 }
@@ -351,11 +357,11 @@ func (suite *PouchCreateSuite) TestCreateWithUser(c *check.C) {
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.Config.User, check.Equals, user)
+	c.Assert(result[0].Config.User, check.Equals, user)
 }
 
 // TestCreateWithIntelRdt tests creating container with Intel Rdt.
@@ -368,11 +374,11 @@ func (suite *PouchCreateSuite) TestCreateWithIntelRdt(c *check.C) {
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(result.HostConfig.IntelRdtL3Cbm, check.Equals, intelRdt)
+	c.Assert(result[0].HostConfig.IntelRdtL3Cbm, check.Equals, intelRdt)
 }
 
 // TestCreateWithAliOSMemoryOptions tests creating container with AliOS container isolation options.
@@ -386,12 +392,68 @@ func (suite *PouchCreateSuite) TestCreateWithAliOSMemoryOptions(c *check.C) {
 
 	output := command.PouchRun("inspect", name).Stdout()
 
-	result := &types.ContainerJSON{}
-	if err := json.Unmarshal([]byte(output), result); err != nil {
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		c.Errorf("failed to decode inspect output: %v", err)
 	}
-	c.Assert(*result.HostConfig.MemoryWmarkRatio, check.Equals, int64(30))
-	c.Assert(*result.HostConfig.MemoryExtra, check.Equals, int64(50))
-	c.Assert(result.HostConfig.MemoryForceEmptyCtl, check.Equals, int64(1))
-	c.Assert(result.HostConfig.ScheLatSwitch, check.Equals, int64(1))
+	c.Assert(*result[0].HostConfig.MemoryWmarkRatio, check.Equals, int64(30))
+	c.Assert(*result[0].HostConfig.MemoryExtra, check.Equals, int64(50))
+	c.Assert(result[0].HostConfig.MemoryForceEmptyCtl, check.Equals, int64(1))
+	c.Assert(result[0].HostConfig.ScheLatSwitch, check.Equals, int64(1))
+}
+
+// TestCreateWithOOMOption tests creating container with oom options.
+func (suite *PouchCreateSuite) TestCreateWithOOMOption(c *check.C) {
+	name := "TestCreateWithOOMOption"
+	oomScore := "100"
+
+	res := command.PouchRun("create", "--name", name, "--oom-score-adj", oomScore, "--oom-kill-disable", busyboxImage)
+	res.Assert(c, icmd.Success)
+
+	output := command.PouchRun("inspect", name).Stdout()
+
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+	c.Assert(result[0].HostConfig.OomScoreAdj, check.Equals, int64(100))
+	c.Assert(*result[0].HostConfig.OomKillDisable, check.Equals, true)
+}
+
+// TestCreateWithAnnotation tests creating container with annotation.
+func (suite *PouchCreateSuite) TestCreateWithAnnotation(c *check.C) {
+	cname := "TestCreateWithAnnotation"
+	command.PouchRun("create", "--annotation", "a=b", "--annotation", "foo=bar", "--name", cname, busyboxImage).Stdout()
+
+	output := command.PouchRun("inspect", cname).Stdout()
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+
+	// kv in map not in order.
+	var annotationSlice []string
+	for k, v := range result[0].Config.SpecAnnotation {
+		annotationSlice = append(annotationSlice, fmt.Sprintf("%s=%s", k, v))
+	}
+	annotationStr := strings.Join(annotationSlice, " ")
+
+	c.Assert(util.PartialEqual(annotationStr, "a=b"), check.IsNil)
+	c.Assert(util.PartialEqual(annotationStr, "foo=bar"), check.IsNil)
+}
+
+// TestCreateWithUlimit tests creating container with annotation.
+func (suite *PouchCreateSuite) TestCreateWithUlimit(c *check.C) {
+	cname := "TestCreateWithUlimit"
+	command.PouchRun("create", "--ulimit", "nproc=21", "--name", cname, busyboxImage).Assert(c, icmd.Success)
+
+	output := command.PouchRun("inspect", cname).Stdout()
+	result := []types.ContainerJSON{}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		c.Errorf("failed to decode inspect output: %v", err)
+	}
+	ul := result[0].HostConfig.Ulimits[0]
+	c.Assert(ul.Name, check.Equals, "nproc")
+	c.Assert(int(ul.Hard), check.Equals, 21)
+	c.Assert(int(ul.Soft), check.Equals, 21)
 }

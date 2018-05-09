@@ -15,7 +15,7 @@ pouch version
 ```
 $ pouch version
 GoVersion:       go1.9.1
-KernelVersion:
+KernelVersion:   3.10.0-693.11.6.el7.x86_64
 Os:              linux
 Version:         0.1.0-dev
 APIVersion:      1.24
@@ -34,6 +34,7 @@ GitCommit:
 ### Options inherited from parent commands
 
 ```
+  -D, --debug              Switch client log level to DEBUG mode
   -H, --host string        Specify connecting address of Pouch CLI (default "unix:///var/run/pouchd.sock")
       --tlscacert string   Specify CA file of TLS
       --tlscert string     Specify cert file of TLS

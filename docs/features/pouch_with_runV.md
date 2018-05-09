@@ -1,6 +1,6 @@
 # Pouch with runV
 
-Container technology develops rapidly recently. It provides much convenience for application packing and resource utilization improvement. At the same time it brings benefits, LXC-based container technology also loses the appropriate security. Specifically, containers share operating system kernel on one machine. Once one container attemps to attack kernel, all workload on this host would be influenced.
+Container technology develops rapidly recently. It provides much convenience for application packing and resource utilization improvement. At the same time it brings benefits, LXC-based container technology also loses the appropriate security. Specifically, containers share operating system kernel on one machine. Once one container attempts to attack kernel, all workload on this host would be influenced.
 
 For some scenarios which are sensitive and strict to security, pure container technology has apparent defects. What's more, in cloud era multi-tenancy is the rigid demand from cloud customers. Therefore, strong isolation must be guaranteed seriously. In another word, container techonology needs more security hardening.
 
@@ -47,8 +47,8 @@ sudo yum install -y qemu qemu-kvm
 First, clone version v1.0.0 of runv project from GitHub:
 
 ```
-mkdir -p $Home/go/src/github.com/hyper
-cd $Home/go/src/github.com/hyper
+mkdir -p $Home/go/src/github.com/hyperhq
+cd $Home/go/src/github.com/hyperhq
 git clone --branch v1.0.0 https://github.com/hyperhq/runv.git
 export GOPATH=$HOME/go
 ```
@@ -72,7 +72,7 @@ Then binary runv will be located in your PATH.
 [hyperstart](https://github.com/hyperhq/hyperstart) provides init task for hypervisor-based containers. We need to build guest kernel and initrd.img from source code version v1.0.0 as well:
 
 ```
-cd $Home/go/src/github.com/hyper
+cd $Home/go/src/github.com/hyperhq
 git clone --branch v1.0.0 https://github.com/hyperhq/hyperstart.git
 cd hyperstart
 ./autogen.sh
@@ -118,7 +118,7 @@ $
 $ pouch start hypervisor -i
 / # uname -a
 Linux 4.12.4-hyper #18 SMP Mon Sep 4 15:10:13 CST 2017 x86_64 GNU/Linux
-``` 
+```
 
 It turns out that in experiment above kernel in host physical machine is 4.4.0-101-generic, and that in hypervisor-based container is 4.12.4-hyper. Obviously, they are isolated from each other in term of kernel.
 

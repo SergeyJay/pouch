@@ -2,16 +2,24 @@ package mgr
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/alibaba/pouch/apis/types"
-	"github.com/alibaba/pouch/ctrd"
+	"github.com/alibaba/pouch/cri/stream/remotecommand"
 	"github.com/alibaba/pouch/pkg/meta"
 	"github.com/alibaba/pouch/pkg/utils"
 
 	"github.com/opencontainers/image-spec/specs-go/v1"
+)
+
+var (
+	// GCExecProcessTick is the time interval to trigger gc unused exec config,
+	// time unit is minute.
+	GCExecProcessTick = 5
 )
 
 const (
@@ -23,20 +31,28 @@ const (
 // container in the store.
 type ContainerFilter func(*ContainerMeta) bool
 
-type containerExecConfig struct {
+// ContainerExecConfig is the config a process exec.
+type ContainerExecConfig struct {
+	// ExecID identifies the ID of this exec
+	ExecID string
+
+	// contains the config of this exec
 	types.ExecCreateConfig
 
 	// Save the container's id into exec config.
 	ContainerID string
 
-	// Get exit message from exitCh, we could only get it once.
-	// Do we need to get the result of exec many times?
-	exitCh chan *ctrd.Message
-}
+	// ExitCode records the exit code of a exec process.
+	ExitCode int64
 
-// ContainerExecInspect holds low-level information about exec command.
-type ContainerExecInspect struct {
-	ExitCh chan *ctrd.Message
+	// Running represents whether the exec process is running inside container.
+	Running bool
+
+	// Error represents the exec process response error.
+	Error error
+
+	// WaitForClean means exec process can be removed.
+	WaitForClean bool
 }
 
 // AttachConfig wraps some infos of attaching.
@@ -45,19 +61,24 @@ type AttachConfig struct {
 	Stdout bool
 	Stderr bool
 
+	// For IO backend like http, we need to mux stdout & stderr
+	// if terminal is disabled.
+	// But for other IO backend, it is not necessary.
+	// So we should make it configurable.
+	MuxDisabled bool
+
 	// Attach using http.
 	Hijack  http.Hijacker
 	Upgrade bool
 
 	// Attach using memory buffer.
 	MemBuffer *bytes.Buffer
-}
 
-// ContainerRemoveOption wraps the container remove interface params.
-type ContainerRemoveOption struct {
-	Force  bool
-	Volume bool
-	Link   bool
+	// Attach using streams.
+	Streams *remotecommand.Streams
+
+	// Attach to the container to get its log.
+	CriLogFile *os.File
 }
 
 // ContainerListOption wraps the container list interface params.
@@ -74,6 +95,9 @@ type ContainerMeta struct {
 	// seccomp profile
 	SeccompProfile string `json:"SeccompProfile,omitempty"`
 
+	// no new privileges
+	NoNewPrivileges bool `json:"NoNewPrivileges,omitempty"`
+
 	// The arguments to the command being run
 	Args []string `json:"Args"`
 
@@ -88,6 +112,11 @@ type ContainerMeta struct {
 
 	// exec ids
 	ExecIds string `json:"ExecIDs,omitempty"`
+
+	// Snapshotter, GraphDriver is same, keep both
+	// just for compatibility
+	// snapshotter informations of container
+	Snapshotter *types.SnapshotterData `json:"Snapshotter,omitempty"`
 
 	// graph driver
 	GraphDriver *types.GraphDriverData `json:"GraphDriver,omitempty"`
@@ -146,7 +175,7 @@ type ContainerMeta struct {
 	State *types.ContainerState `json:"State,omitempty"`
 
 	// BaseFS
-	BaseFS string
+	BaseFS string `json:"BaseFS, omitempty"`
 }
 
 // Key returns container's id.
@@ -160,11 +189,13 @@ func (meta *ContainerMeta) merge(getconfig func() (v1.ImageConfig, error)) error
 		return err
 	}
 
+	// If user specify the Entrypoint, no need to merge image's configuration.
+	// Otherwise use the image's configuration to fill it.
 	if len(meta.Config.Entrypoint) == 0 {
+		if len(meta.Config.Cmd) == 0 {
+			meta.Config.Cmd = config.Cmd
+		}
 		meta.Config.Entrypoint = config.Entrypoint
-	}
-	if len(meta.Config.Cmd) == 0 {
-		meta.Config.Cmd = config.Cmd
 	}
 	if meta.Config.Env == nil {
 		meta.Config.Env = config.Env
@@ -182,26 +213,48 @@ func (meta *ContainerMeta) merge(getconfig func() (v1.ImageConfig, error)) error
 func (meta *ContainerMeta) FormatStatus() (string, error) {
 	var status string
 
-	// return status if container is not running
-	if meta.State.Status != types.StatusRunning && meta.State.Status != types.StatusPaused {
+	switch meta.State.Status {
+	case types.StatusRunning, types.StatusPaused:
+		start, err := time.Parse(utils.TimeLayout, meta.State.StartedAt)
+		if err != nil {
+			return "", err
+		}
+
+		startAt, err := utils.FormatTimeInterval(start.UnixNano())
+		if err != nil {
+			return "", err
+		}
+
+		status = "Up " + startAt
+		if meta.State.Status == types.StatusPaused {
+			status += "(paused)"
+		}
+
+	case types.StatusStopped, types.StatusExited:
+		finish, err := time.Parse(utils.TimeLayout, meta.State.FinishedAt)
+		if err != nil {
+			return "", err
+		}
+
+		finishAt, err := utils.FormatTimeInterval(finish.UnixNano())
+		if err != nil {
+			return "", err
+		}
+
+		//FIXME: if stop status is needed ?
+		exitCode := meta.State.ExitCode
+		if meta.State.Status == types.StatusStopped {
+			status = fmt.Sprintf("Stopped (%d) %s", exitCode, finishAt)
+		}
+		if meta.State.Status == types.StatusExited {
+			status = fmt.Sprintf("Exited (%d) %s", exitCode, finishAt)
+		}
+	}
+
+	if status == "" {
 		return string(meta.State.Status), nil
 	}
 
-	// format container status if container is running
-	start, err := time.Parse(utils.TimeLayout, meta.State.StartedAt)
-	if err != nil {
-		return "", err
-	}
-
-	startAt, err := utils.FormatTimeInterval(start.UnixNano())
-	if err != nil {
-		return "", err
-	}
-
-	status = "Up " + startAt
-	if meta.State.Status == types.StatusPaused {
-		status += "(paused)"
-	}
 	return status, nil
 }
 

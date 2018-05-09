@@ -39,7 +39,7 @@ API is an HTTP API served by Pouch Engine.
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|no error|string|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Example HTTP response
@@ -111,7 +111,7 @@ POST /containers/create
 |**400**|bad parameter|[Error](#error)|
 |**404**|no such image|[Error](#error)|
 |**409**|conflict|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Consumes
@@ -169,7 +169,7 @@ GET /containers/json
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|Summary containers that matches the query|< [Container](#container) > array|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -197,8 +197,8 @@ DELETE /containers/{id}
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**204**|no error|No Content|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -233,7 +233,7 @@ Content-Type: application/vnd.raw-stream
 
 After the headers and two new lines, the TCP connection can now be used for raw, bidirectional communication between the client and server.
 
-To hint potential proxies about connection hijacking, the Docker client can also optionally send connection upgrade headers.
+To hint potential proxies about connection hijacking, the Pouch client can also optionally send connection upgrade headers.
 
 For example, the client sends this request to upgrade the connection:
 
@@ -243,7 +243,7 @@ Upgrade: tcp
 Connection: Upgrade
 ```
 
-The Docker daemon will respond with a `101 UPGRADED` response, and will similarly follow with the raw stream:
+The Pouch daemon will respond with a `101 UPGRADED` response, and will similarly follow with the raw stream:
 
 ```
 HTTP/1.1 101 UPGRADED
@@ -358,9 +358,9 @@ Run a command inside a running container.
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**201**|no error|[ExecCreateResp](#execcreateresp)|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
 |**409**|container is paused|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Consumes
@@ -402,13 +402,55 @@ Return low-level information about a container.
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|no error|[ContainerJSON](#containerjson)|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
 
 * `application/json`
+
+
+#### Tags
+
+* Container
+
+
+<a name="containerlogs"></a>
+### Get container logs
+```
+GET /containers/{id}/logs
+```
+
+
+#### Description
+Get `stdout` and `stderr` logs from a container.
+
+Note: This endpoint works only for containers with the `json-file` or `journald` logging driver.
+
+
+#### Parameters
+
+|Type|Name|Description|Schema|Default|
+|---|---|---|---|---|
+|**Path**|**id**  <br>*required*|ID or name of the container|string||
+|**Query**|**follow**  <br>*optional*|Return the logs as a stream.|boolean|`"false"`|
+|**Query**|**since**  <br>*optional*|Only return logs since this time, as a UNIX timestamp|integer|`0`|
+|**Query**|**stderr**  <br>*optional*|Return logs from `stderr`|boolean|`"false"`|
+|**Query**|**stdout**  <br>*optional*|Return logs from `stdout`|boolean|`"false"`|
+|**Query**|**tail**  <br>*optional*|Only return this number of log lines from the end of the logs. Specify as an integer or `all` to output all log lines.|string|`"all"`|
+|**Query**|**timestamps**  <br>*optional*|Add timestamps to every log line|boolean|`"false"`|
+|**Query**|**until**  <br>*optional*|Only return logs before this time, as a UNIX timestamp|integer|`0`|
+
+
+#### Responses
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**101**|logs returned as a stream|string (binary)|
+|**200**|logs returned as a string in response body|string|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -435,8 +477,8 @@ POST /containers/{id}/pause
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**204**|no error|No Content|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -464,9 +506,68 @@ POST /containers/{id}/rename
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**204**|no error|No Content|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
 |**409**|name already in use|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
+
+
+#### Tags
+
+* Container
+
+
+<a name="containerresize"></a>
+### changes the size of the tty for a container
+```
+POST /containers/{id}/resize
+```
+
+
+#### Parameters
+
+|Type|Name|Description|Schema|
+|---|---|---|---|
+|**Path**|**id**  <br>*required*|ID or name of the container|string|
+|**Query**|**height**  <br>*optional*|height of the tty|string|
+|**Query**|**width**  <br>*optional*|width of the tty|string|
+
+
+#### Responses
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**200**|no error|No Content|
+|**400**|bad parameter|[Error](#error)|
+
+
+#### Tags
+
+* Container
+
+
+<a name="containerrestart"></a>
+### Restart a container
+```
+POST /containers/{id}/restart
+```
+
+
+#### Parameters
+
+|Type|Name|Description|Schema|
+|---|---|---|---|
+|**Path**|**id**  <br>*required*|ID or name of the container|string|
+|**Query**|**name**  <br>*required*|New name for the container|string|
+|**Query**|**t**  <br>*optional*|Number of seconds to wait before killing the container|integer|
+
+
+#### Responses
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**204**|no error|No Content|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -494,8 +595,8 @@ POST /containers/{id}/start
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**204**|no error|No Content|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -523,8 +624,37 @@ POST /containers/{id}/stop
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**204**|no error|No Content|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
+
+
+#### Tags
+
+* Container
+
+
+<a name="containertop"></a>
+### Display the running processes of a container
+```
+POST /containers/{id}/top
+```
+
+
+#### Parameters
+
+|Type|Name|Description|Schema|
+|---|---|---|---|
+|**Path**|**id**  <br>*required*|ID or name of the container|string|
+|**Query**|**ps_args**  <br>*optional*|top arguments|string|
+
+
+#### Responses
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**200**|no error|[ContainerProcessList](#containerprocesslist)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -551,8 +681,8 @@ POST /containers/{id}/unpause
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**204**|no error|No Content|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -581,13 +711,113 @@ POST /containers/{id}/update
 |---|---|---|
 |**200**|no error|No Content|
 |**400**|bad parameter|[Error](#error)|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
 
 * Container
+
+
+<a name="containerupgrade"></a>
+### Upgrade a container with new image and args
+```
+POST /containers/{id}/upgrade
+```
+
+
+#### Parameters
+
+|Type|Name|Description|Schema|
+|---|---|---|---|
+|**Path**|**id**  <br>*required*|ID or name of the container|string|
+|**Body**|**upgradeConfig**  <br>*optional*||[ContainerUpgradeConfig](#containerupgradeconfig)|
+
+
+#### Responses
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**200**|no error|No Content|
+|**400**|bad parameter|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
+
+
+#### Tags
+
+* Container
+
+
+<a name="daemon-update-post"></a>
+### Update daemon's labels and image proxy
+```
+POST /daemon/update
+```
+
+
+#### Parameters
+
+|Type|Name|Description|Schema|
+|---|---|---|---|
+|**Body**|**DaemonUpdateConfig**  <br>*optional*|Config used to update daemon, only labels and image proxy are allowed.|[DaemonUpdateConfig](#daemonupdateconfig)|
+
+
+#### Responses
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**200**|no error|No Content|
+|**400**|bad parameter|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
+
+
+#### Consumes
+
+* `application/json`
+
+
+#### Produces
+
+* `application/json`
+
+
+<a name="execinspect"></a>
+### Inspect an exec instance
+```
+GET /exec/{id}/json
+```
+
+
+#### Description
+Return low-level information about an exec instance.
+
+
+#### Parameters
+
+|Type|Name|Description|Schema|
+|---|---|---|---|
+|**Path**|**id**  <br>*required*|Exec instance ID|string|
+
+
+#### Responses
+
+|HTTP Code|Description|Schema|
+|---|---|---|
+|**200**|No error|[ContainerExecInspect](#containerexecinspect)|
+|**404**|No such exec instance|[4ErrorResponse](#4errorresponse)|
+|**500**|Server error|[0ErrorResponse](#0errorresponse)|
+
+
+#### Produces
+
+* `application/json`
+
+
+#### Tags
+
+* Exec
 
 
 <a name="execstart"></a>
@@ -670,7 +900,7 @@ POST /images/create
 |---|---|---|
 |**200**|no error|No Content|
 |**404**|image not found|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Consumes
@@ -709,7 +939,7 @@ Return a list of stored images.
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|Summary image data for the images matching the query|< [ImageInfo](#imageinfo) > array|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -760,7 +990,7 @@ GET /images/search
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|No error|< [SearchResultItem](#searchresultitem) > array|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -793,7 +1023,7 @@ Remove an image by reference.
 |---|---|---|
 |**204**|No error|No Content|
 |**404**|no such image|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Example HTTP response
@@ -831,7 +1061,7 @@ Return the information about image
 |---|---|---|
 |**200**|no error|[ImageInfo](#imageinfo)|
 |**404**|no such image|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -876,7 +1106,7 @@ GET /info
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|no error|[SystemInfo](#systeminfo)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 <a name="networklist"></a>
@@ -891,7 +1121,7 @@ GET /networks
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|Summary networks that matches the query|[NetworkListResp](#networklistresp)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -925,7 +1155,7 @@ POST /networks/create
 |**201**|The network was created successfully|[NetworkCreateResp](#networkcreateresp)|
 |**400**|bad parameter|[Error](#error)|
 |**409**|name already in use|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Consumes
@@ -962,8 +1192,8 @@ GET /networks/{id}
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|No error|[NetworkInspectResp](#networkinspectresp)|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -996,8 +1226,8 @@ DELETE /networks/{id}
 |---|---|---|
 |**204**|No error|No Content|
 |**403**|operation not supported for pre-defined networks|[Error](#error)|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -1017,7 +1247,7 @@ GET /version
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|no error|[SystemVersion](#systemversion)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 <a name="volumelist"></a>
@@ -1039,7 +1269,7 @@ GET /volumes
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|Summary volume data that matches the query|[VolumeListResp](#volumelistresp)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -1098,7 +1328,7 @@ POST /volumes/create
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**201**|The volume was created successfully|[VolumeInfo](#volumeinfo)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Consumes
@@ -1151,8 +1381,8 @@ GET /volumes/{id}
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**200**|No error|[VolumeInfo](#volumeinfo)|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Produces
@@ -1184,8 +1414,8 @@ DELETE /volumes/{id}
 |HTTP Code|Description|Schema|
 |---|---|---|
 |**204**|No error|No Content|
-|**404**|An unexpected 404 error occured.|[Error](#error)|
-|**500**|An unexpected server error occured.|[Error](#error)|
+|**404**|An unexpected 404 error occurred.|[Error](#error)|
+|**500**|An unexpected server error occurred.|[Error](#error)|
 
 
 #### Tags
@@ -1222,6 +1452,19 @@ The response returned by login to a registry
 |**Status**  <br>*required*|The status of the authentication|string|
 
 
+<a name="commit"></a>
+### Commit
+Commit holds the Git-commit (SHA1) that a binary was built from, as
+reported in the version-string of external tools, such as `containerd`,
+or `runC`.
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**Expected**  <br>*optional*|Commit ID of external tool expected by pouchd as set at build time.  <br>**Example** : `"2d41c047c83e09a6d61d464906feb2a2f3c52aa4"`|string|
+|**ID**  <br>*optional*|Actual commit ID of external tool.  <br>**Example** : `"cfb82a876ecc11b5ca0977d1733adbe58599088a"`|string|
+
+
 <a name="container"></a>
 ### Container
 an array of Container contains response of Engine API:
@@ -1233,7 +1476,7 @@ GET "/containers/json"
 |**Command**  <br>*optional*||string|
 |**Created**  <br>*optional*|Created time of container in daemon.|integer (int64)|
 |**HostConfig**  <br>*optional*|In Moby's API, HostConfig field in Container struct has following type <br>struct { NetworkMode string `json:",omitempty"` }<br>In Pouch, we need to pick runtime field in HostConfig from daemon side to judge runtime type,<br>So Pouch changes this type to be the complete HostConfig.<br>Incompatibility exists, ATTENTION.|[HostConfig](#hostconfig)|
-|**ID**  <br>*optional*||string|
+|**Id**  <br>*optional*|Container ID|string|
 |**Image**  <br>*optional*||string|
 |**ImageID**  <br>*optional*||string|
 |**Labels**  <br>*optional*||< string, string > map|
@@ -1258,8 +1501,9 @@ Configuration for a container that is portable between hosts
 |**AttachStdin**  <br>*optional*|Whether to attach to `stdin`.|boolean|
 |**AttachStdout**  <br>*optional*|Whether to attach to `stdout`.  <br>**Default** : `true`|boolean|
 |**Cmd**  <br>*optional*|Command to run specified an array of strings.|< string > array|
+|**DiskQuota**  <br>*optional*|Set disk quota for container|< string, string > map|
 |**Domainname**  <br>*optional*|The domain name to use for the container.|string|
-|**Entrypoint**  <br>*optional*|The entry point for the container as a string or an array of strings.<br>If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default (i.e., the entry point used by pouch when there is no `ENTRYPOINT` instruction in the `Dockerfile`).|< string > array|
+|**Entrypoint**  <br>*optional*|The entry point for the container as a string or an array of strings.<br>If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default.|< string > array|
 |**Env**  <br>*optional*|A list of environment variables to set inside the container in the form `["VAR=value", ...]`. A variable without `=` is removed from the environment, rather than to have an empty value.|< string > array|
 |**ExposedPorts**  <br>*optional*|An object mapping ports to an empty object in the form:`{<port>/<tcp\|udp>: {}}`|< string, object > map|
 |**Hostname**  <br>*optional*|The hostname to use for the container, as a valid RFC 1123 hostname.  <br>**Minimum length** : `1`|string (hostname)|
@@ -1268,11 +1512,12 @@ Configuration for a container that is portable between hosts
 |**Labels**  <br>*optional*|User-defined key/value metadata.|< string, string > map|
 |**MacAddress**  <br>*optional*|MAC address of the container.|string|
 |**NetworkDisabled**  <br>*optional*|Disable networking for the container.|boolean|
-|**OnBuild**  <br>*optional*|`ONBUILD` metadata that were defined in the image's `Dockerfile`.|< string > array|
+|**OnBuild**  <br>*optional*|`ONBUILD` metadata that were defined.|< string > array|
 |**OpenStdin**  <br>*optional*|Open `stdin`|boolean|
 |**Rich**  <br>*optional*|Whether to start container in rich container mode. (default false)|boolean|
 |**RichMode**  <br>*optional*|Choose one rich container mode.(default dumb-init)|enum (dumb-init, sbin-init, systemd)|
 |**Shell**  <br>*optional*|Shell for when `RUN`, `CMD`, and `ENTRYPOINT` uses a shell.|< string > array|
+|**SpecAnnotation**  <br>*optional*|annotations send to runtime spec.|< string, string > map|
 |**StdinOnce**  <br>*optional*|Close `stdin` after one attached client disconnects|boolean|
 |**StopSignal**  <br>*optional*|Signal to stop a container as a string or unsigned integer.  <br>**Default** : `"SIGTERM"`|string|
 |**StopTimeout**  <br>*optional*|Timeout to stop a container in seconds.|integer|
@@ -1298,8 +1543,9 @@ It can be used to encode client params in client and unmarshal request body in d
 |**AttachStdin**  <br>*optional*|Whether to attach to `stdin`.|boolean|
 |**AttachStdout**  <br>*optional*|Whether to attach to `stdout`.  <br>**Default** : `true`|boolean|
 |**Cmd**  <br>*optional*|Command to run specified an array of strings.|< string > array|
+|**DiskQuota**  <br>*optional*|Set disk quota for container|< string, string > map|
 |**Domainname**  <br>*optional*|The domain name to use for the container.|string|
-|**Entrypoint**  <br>*optional*|The entry point for the container as a string or an array of strings.<br>If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default (i.e., the entry point used by pouch when there is no `ENTRYPOINT` instruction in the `Dockerfile`).|< string > array|
+|**Entrypoint**  <br>*optional*|The entry point for the container as a string or an array of strings.<br>If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default.|< string > array|
 |**Env**  <br>*optional*|A list of environment variables to set inside the container in the form `["VAR=value", ...]`. A variable without `=` is removed from the environment, rather than to have an empty value.|< string > array|
 |**ExposedPorts**  <br>*optional*|An object mapping ports to an empty object in the form:`{<port>/<tcp\|udp>: {}}`|< string, object > map|
 |**HostConfig**  <br>*optional*||[HostConfig](#hostconfig)|
@@ -1310,11 +1556,12 @@ It can be used to encode client params in client and unmarshal request body in d
 |**MacAddress**  <br>*optional*|MAC address of the container.|string|
 |**NetworkDisabled**  <br>*optional*|Disable networking for the container.|boolean|
 |**NetworkingConfig**  <br>*optional*||[NetworkingConfig](#networkingconfig)|
-|**OnBuild**  <br>*optional*|`ONBUILD` metadata that were defined in the image's `Dockerfile`.|< string > array|
+|**OnBuild**  <br>*optional*|`ONBUILD` metadata that were defined.|< string > array|
 |**OpenStdin**  <br>*optional*|Open `stdin`|boolean|
 |**Rich**  <br>*optional*|Whether to start container in rich container mode. (default false)|boolean|
 |**RichMode**  <br>*optional*|Choose one rich container mode.(default dumb-init)|enum (dumb-init, sbin-init, systemd)|
 |**Shell**  <br>*optional*|Shell for when `RUN`, `CMD`, and `ENTRYPOINT` uses a shell.|< string > array|
+|**SpecAnnotation**  <br>*optional*|annotations send to runtime spec.|< string, string > map|
 |**StdinOnce**  <br>*optional*|Close `stdin` after one attached client disconnects|boolean|
 |**StopSignal**  <br>*optional*|Signal to stop a container as a string or unsigned integer.  <br>**Default** : `"SIGTERM"`|string|
 |**StopTimeout**  <br>*optional*|Timeout to stop a container in seconds.|integer|
@@ -1334,6 +1581,25 @@ response returned by daemon when container create successfully
 |**Id**  <br>*required*|The ID of the created container|string|
 |**Name**  <br>*optional*|The name of the created container|string|
 |**Warnings**  <br>*required*|Warnings encountered when creating the container|< string > array|
+
+
+<a name="containerexecinspect"></a>
+### ContainerExecInspect
+holds information about a running process started.
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**CanRemove**  <br>*optional*||boolean|
+|**ContainerID**  <br>*optional*|The ID of this container|string|
+|**DetachKeys**  <br>*optional*||string|
+|**ExitCode**  <br>*optional*|The last exit code of this container|integer|
+|**ID**  <br>*optional*|The ID of this exec|string|
+|**OpenStderr**  <br>*optional*||boolean|
+|**OpenStdin**  <br>*optional*||boolean|
+|**OpenStdout**  <br>*optional*||boolean|
+|**ProcessConfig**  <br>*optional*||[ProcessConfig](#processconfig)|
+|**Running**  <br>*optional*||boolean|
 
 
 <a name="containerjson"></a>
@@ -1370,6 +1636,34 @@ GET "/containers/{id}/json"
 |**State**  <br>*optional*|The state of the container.|[ContainerState](#containerstate)|
 
 
+<a name="containerlogsoptions"></a>
+### ContainerLogsOptions
+The parameters to filter the log.
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**Details**  <br>*optional*|Show extra details provided to logs|boolean|
+|**Follow**  <br>*optional*|Return logs as a stream|boolean|
+|**ShowStderr**  <br>*optional*|Return logs from `stderr`|boolean|
+|**ShowStdout**  <br>*optional*|Return logs from `stdout`|boolean|
+|**Since**  <br>*optional*|Only return logs after this time, as a UNIX timestamp|string|
+|**Tail**  <br>*optional*|Only reture this number of log lines from the end of the logs. Specify as an integer or `all` to output all log lines.|string|
+|**Timestamps**  <br>*optional*|Add timestamps to every log line|boolean|
+|**Until**  <br>*optional*|Only reture logs before this time, as a UNIX timestamp|string|
+
+
+<a name="containerprocesslist"></a>
+### ContainerProcessList
+OK Response to ContainerTop operation
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**Processes**  <br>*optional*|Each process running in the container, where each is process is an array of values corresponding to the titles|< < string > array > array|
+|**Titles**  <br>*optional*|The ps column titles|< string > array|
+
+
 <a name="containerstate"></a>
 ### ContainerState
 
@@ -1386,6 +1680,58 @@ GET "/containers/{id}/json"
 |**Running**  <br>*optional*|Whether this container is running.<br><br>Note that a running container can be _paused_. The `Running` and `Paused`<br>booleans are not mutually exclusive:<br><br>When pausing a container (on Linux), the cgroups freezer is used to suspend<br>all processes in the container. Freezing the process requires the process to<br>be running. As a result, paused containers are both `Running` _and_ `Paused`.<br><br>Use the `Status` field instead to determine if a container's state is "running".|boolean|
 |**StartedAt**  <br>*optional*|The time when this container was last started.|string|
 |**Status**  <br>*optional*||[Status](#status)|
+
+
+<a name="containerupgradeconfig"></a>
+### ContainerUpgradeConfig
+ContainerUpgradeConfig is used for API "POST /containers/upgrade".
+It wraps all kinds of config used in container upgrade.
+It can be used to encode client params in client and unmarshal request body in daemon side.
+
+*Polymorphism* : Composition
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**ArgsEscaped**  <br>*optional*|Command is already escaped (Windows only)|boolean|
+|**AttachStderr**  <br>*optional*|Whether to attach to `stderr`.  <br>**Default** : `true`|boolean|
+|**AttachStdin**  <br>*optional*|Whether to attach to `stdin`.|boolean|
+|**AttachStdout**  <br>*optional*|Whether to attach to `stdout`.  <br>**Default** : `true`|boolean|
+|**Cmd**  <br>*optional*|Command to run specified an array of strings.|< string > array|
+|**DiskQuota**  <br>*optional*|Set disk quota for container|< string, string > map|
+|**Domainname**  <br>*optional*|The domain name to use for the container.|string|
+|**Entrypoint**  <br>*optional*|The entry point for the container as a string or an array of strings.<br>If the array consists of exactly one empty string (`[""]`) then the entry point is reset to system default.|< string > array|
+|**Env**  <br>*optional*|A list of environment variables to set inside the container in the form `["VAR=value", ...]`. A variable without `=` is removed from the environment, rather than to have an empty value.|< string > array|
+|**ExposedPorts**  <br>*optional*|An object mapping ports to an empty object in the form:`{<port>/<tcp\|udp>: {}}`|< string, object > map|
+|**HostConfig**  <br>*optional*||[HostConfig](#hostconfig)|
+|**Hostname**  <br>*optional*|The hostname to use for the container, as a valid RFC 1123 hostname.  <br>**Minimum length** : `1`|string (hostname)|
+|**Image**  <br>*required*|The name of the image to use when creating the container|string|
+|**InitScript**  <br>*optional*|Initial script executed in container. The script will be executed before entrypoint or command|string|
+|**Labels**  <br>*optional*|User-defined key/value metadata.|< string, string > map|
+|**MacAddress**  <br>*optional*|MAC address of the container.|string|
+|**NetworkDisabled**  <br>*optional*|Disable networking for the container.|boolean|
+|**OnBuild**  <br>*optional*|`ONBUILD` metadata that were defined.|< string > array|
+|**OpenStdin**  <br>*optional*|Open `stdin`|boolean|
+|**Rich**  <br>*optional*|Whether to start container in rich container mode. (default false)|boolean|
+|**RichMode**  <br>*optional*|Choose one rich container mode.(default dumb-init)|enum (dumb-init, sbin-init, systemd)|
+|**Shell**  <br>*optional*|Shell for when `RUN`, `CMD`, and `ENTRYPOINT` uses a shell.|< string > array|
+|**SpecAnnotation**  <br>*optional*|annotations send to runtime spec.|< string, string > map|
+|**StdinOnce**  <br>*optional*|Close `stdin` after one attached client disconnects|boolean|
+|**StopSignal**  <br>*optional*|Signal to stop a container as a string or unsigned integer.  <br>**Default** : `"SIGTERM"`|string|
+|**StopTimeout**  <br>*optional*|Timeout to stop a container in seconds.|integer|
+|**Tty**  <br>*optional*|Attach standard streams to a TTY, including `stdin` if it is not closed.|boolean|
+|**User**  <br>*optional*|The user that commands are run as inside the container.|string|
+|**Volumes**  <br>*optional*|An object mapping mount point paths inside the container to empty objects.|< string, object > map|
+|**WorkingDir**  <br>*optional*|The working directory for commands to run in.|string|
+
+
+<a name="daemonupdateconfig"></a>
+### DaemonUpdateConfig
+
+|Name|Description|Schema|
+|---|---|---|
+|**ImageProxy**  <br>*optional*|Image proxy used to pull image.|string|
+|**Labels**  <br>*optional*|Labels indentified the attributes of daemon  <br>**Example** : `[ "storage=ssd", "zone=hangzhou" ]`|< string > array|
 
 
 <a name="devicemapping"></a>
@@ -1444,6 +1790,8 @@ Configuration for a network endpoint.
 
 <a name="execcreateconfig"></a>
 ### ExecCreateConfig
+is a small subset of the Config struct that holds the configuration.
+
 
 |Name|Description|Schema|
 |---|---|---|
@@ -1460,14 +1808,18 @@ Configuration for a network endpoint.
 
 <a name="execcreateresp"></a>
 ### ExecCreateResp
+contains response of Remote API POST "/containers/{name:.*}/exec".
 
-|Name|Schema|
-|---|---|
-|**ID**  <br>*optional*|string|
+
+|Name|Description|Schema|
+|---|---|---|
+|**Id**  <br>*optional*|ID is the exec ID|string|
 
 
 <a name="execstartconfig"></a>
 ### ExecStartConfig
+ExecStartConfig is a temp struct used by execStart.
+
 
 |Name|Description|Schema|
 |---|---|---|
@@ -1511,8 +1863,8 @@ Container configuration that depends on the host we are running on
 |**ContainerIDFile**  <br>*optional*|Path to a file where the container ID is written|string|
 |**CpuCount**  <br>*optional*|The number of usable CPUs (Windows only).<br>On Windows Server containers, the processor resource controls are mutually exclusive. The order of precedence is `CPUCount` first, then `CPUShares`, and `CPUPercent` last.|integer (int64)|
 |**CpuPercent**  <br>*optional*|The usable percentage of the available CPUs (Windows only).<br>On Windows Server containers, the processor resource controls are mutually exclusive. The order of precedence is `CPUCount` first, then `CPUShares`, and `CPUPercent` last.|integer (int64)|
-|**CpuPeriod**  <br>*optional*|CPU CFS (Completely Fair Scheduler) period.<br>The length of a CPU period in microseconds.|integer (int64)|
-|**CpuQuota**  <br>*optional*|CPU CFS (Completely Fair Scheduler) quota.<br>Microseconds of CPU time that the container can get in a CPU period."|integer (int64)|
+|**CpuPeriod**  <br>*optional*|CPU CFS (Completely Fair Scheduler) period.<br>The length of a CPU period in microseconds.  <br>**Minimum value** : `1000`  <br>**Maximum value** : `1000000`|integer (int64)|
+|**CpuQuota**  <br>*optional*|CPU CFS (Completely Fair Scheduler) quota.<br>Microseconds of CPU time that the container can get in a CPU period."  <br>**Minimum value** : `1000`|integer (int64)|
 |**CpuRealtimePeriod**  <br>*optional*|The length of a CPU real-time period in microseconds. Set to 0 to allocate no time allocated to real-time tasks.|integer (int64)|
 |**CpuRealtimeRuntime**  <br>*optional*|The length of a CPU real-time runtime in microseconds. Set to 0 to allocate no time allocated to real-time tasks.|integer (int64)|
 |**CpuShares**  <br>*optional*|An integer value representing this container's relative CPU weight versus other containers.|integer|
@@ -1546,10 +1898,10 @@ Container configuration that depends on the host we are running on
 |**NanoCPUs**  <br>*optional*|CPU quota in units of 10<sup>-9</sup> CPUs.|integer (int64)|
 |**NetworkMode**  <br>*optional*|Network mode to use for this container. Supported standard values are: `bridge`, `host`, `none`, and `container:<name\|id>`. Any other value is taken as a custom network's name to which this container should connect to.|string|
 |**OomKillDisable**  <br>*optional*|Disable OOM Killer for the container.|boolean|
-|**OomScoreAdj**  <br>*optional*|An integer value containing the score given to the container in order to tune OOM killer preferences.  <br>**Example** : `500`|integer|
+|**OomScoreAdj**  <br>*optional*|An integer value containing the score given to the container in order to tune OOM killer preferences.<br>The range is in [-1000, 1000].  <br>**Minimum value** : `-1000`  <br>**Maximum value** : `1000`|integer (int)|
 |**PidMode**  <br>*optional*|Set the PID (Process) Namespace mode for the container. It can be either:<br>- `"container:<name\|id>"`: joins another container's PID namespace<br>- `"host"`: use the host's PID namespace inside the container|string|
-|**PidsLimit**  <br>*optional*|Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this paramter support.|integer (int64)|
-|**PortBindings**  <br>*optional*|A map of exposed container ports and the host port they should map to.|< string, [PortBinding](#portbinding) > map|
+|**PidsLimit**  <br>*optional*|Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this parameter support.|integer (int64)|
+|**PortBindings**  <br>*optional*|A map of exposed container ports and the host port they should map to.|[PortMap](#portmap)|
 |**Privileged**  <br>*optional*|Gives the container full access to the host.|boolean|
 |**PublishAllPorts**  <br>*optional*|Allocates a random host port for all of a container's exposed ports.|boolean|
 |**ReadonlyRootfs**  <br>*optional*|Mount the container's root filesystem as read only.|boolean|
@@ -1633,13 +1985,12 @@ An object containing all details of an image at API side
 |**Architecture**  <br>*optional*|the CPU architecture.|string|
 |**Config**  <br>*optional*||[ContainerConfig](#containerconfig)|
 |**CreatedAt**  <br>*optional*|time of image creation.|string|
-|**Digest**  <br>*optional*|digest of image.|string|
-|**ID**  <br>*optional*|ID of an image.|string|
-|**Name**  <br>*optional*|name of an image.|string|
+|**Id**  <br>*optional*|ID of an image.|string|
 |**Os**  <br>*optional*|the name of the operating system.|string|
+|**RepoDigests**  <br>*optional*|repository with digest.|< string > array|
+|**RepoTags**  <br>*optional*|repository with tag.|< string > array|
 |**RootFS**  <br>*optional*|the rootfs key references the layer content addresses used by the image.|[RootFS](#imageinfo-rootfs)|
 |**Size**  <br>*optional*|size of image's taking disk space.|integer|
-|**Tag**  <br>*optional*|tag of an image.|string|
 
 <a name="imageinfo-rootfs"></a>
 **RootFS**
@@ -1651,6 +2002,19 @@ An object containing all details of an image at API side
 |**Type**  <br>*required*|type of the rootfs|string|
 
 
+<a name="indexinfo"></a>
+### IndexInfo
+IndexInfo contains information about a registry.
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**Mirrors**  <br>*optional*|List of mirrors, expressed as URIs.  <br>**Example** : `[ "https://hub-mirror.corp.example.com:5000/" ]`|< string > array|
+|**Name**  <br>*optional*|Name of the registry.|string|
+|**Official**  <br>*optional*|Indicates whether this is an official registry.  <br>**Example** : `true`|boolean|
+|**Secure**  <br>*optional*|Indicates if the the registry is part of the list of insecure<br>registries.<br><br>If `false`, the registry is insecure. Insecure registries accept<br>un-encrypted (HTTP) and/or untrusted (HTTPS with certificates from<br>unknown CAs) communication.<br><br>> **Warning**: Insecure registries can be useful when running a local<br>> registry. However, because its use creates security vulnerabilities<br>> it should ONLY be enabled for testing purposes. For increased<br>> security, users should add their CA to their system's list of<br>> trusted CAs instead of enabling this option.  <br>**Example** : `true`|boolean|
+
+
 <a name="mountpoint"></a>
 ### MountPoint
 A mount point inside a container
@@ -1658,12 +2022,16 @@ A mount point inside a container
 
 |Name|Schema|
 |---|---|
+|**CopyData**  <br>*optional*|boolean|
 |**Destination**  <br>*optional*|string|
 |**Driver**  <br>*optional*|string|
+|**ID**  <br>*optional*|string|
 |**Mode**  <br>*optional*|string|
 |**Name**  <br>*optional*|string|
+|**Named**  <br>*optional*|boolean|
 |**Propagation**  <br>*optional*|string|
 |**RW**  <br>*optional*|boolean|
+|**Replace**  <br>*optional*|string|
 |**Source**  <br>*optional*|string|
 |**Type**  <br>*optional*|string|
 
@@ -1710,7 +2078,7 @@ contains the response for the remote API: POST /networks/create
 
 |Name|Description|Schema|
 |---|---|---|
-|**ID**  <br>*optional*|ID is the id of the network.|string|
+|**Id**  <br>*optional*|ID is the id of the network.|string|
 |**Warning**  <br>*optional*|Warning means the message of create network result.|string|
 
 
@@ -1722,7 +2090,7 @@ NetworkInfo represents the configuration of a network
 |Name|Description|Schema|
 |---|---|---|
 |**Driver**  <br>*optional*|Driver is the Driver name used to create the network|string|
-|**ID**  <br>*optional*|ID uniquely identifies a network on a single machine|string|
+|**Id**  <br>*optional*|ID uniquely identifies a network on a single machine|string|
 |**Name**  <br>*optional*|Name is the name of the network.|string|
 |**Scope**  <br>*optional*|Scope describes the level at which the network exists|string|
 
@@ -1736,8 +2104,8 @@ is the expected body of the 'GET networks/{id}'' http request message
 |---|---|---|
 |**Driver**  <br>*optional*|Driver means the network's driver.|string|
 |**EnableIPv6**  <br>*optional*|EnableIPv6 represents whether to enable IPv6.|boolean|
-|**ID**  <br>*optional*|ID uniquely identifies a network on a single machine|string|
 |**IPAM**  <br>*optional*|IPAM is the network's IP Address Management.|[IPAM](#ipam)|
+|**Id**  <br>*optional*|ID uniquely identifies a network on a single machine|string|
 |**Internal**  <br>*optional*|Internal checks the network is internal network or not.|boolean|
 |**Labels**  <br>*optional*|Labels holds metadata specific to the network being created.|< string, string > map|
 |**Name**  <br>*optional*|Name is the requested name of the network|string|
@@ -1803,6 +2171,45 @@ entries are added to the mapping table.
 *Type* : < string, < [PortBinding](#portbinding) > array > map
 
 
+<a name="processconfig"></a>
+### ProcessConfig
+ExecProcessConfig holds information about the exec process.
+
+
+|Name|Schema|
+|---|---|
+|**arguments**  <br>*optional*|< string > array|
+|**entrypoint**  <br>*optional*|string|
+|**privileged**  <br>*optional*|boolean|
+|**tty**  <br>*optional*|boolean|
+|**user**  <br>*optional*|string|
+
+
+<a name="registryserviceconfig"></a>
+### RegistryServiceConfig
+RegistryServiceConfig stores daemon registry services configuration.
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**AllowNondistributableArtifactsCIDRs**  <br>*optional*|List of IP ranges to which nondistributable artifacts can be pushed,<br>using the CIDR syntax [RFC 4632](https://tools.ietf.org/html/4632).<br><br>Some images contain artifacts whose distribution is restricted by license.<br>When these images are pushed to a registry, restricted artifacts are not<br>included.<br><br>This configuration override this behavior, and enables the daemon to<br>push nondistributable artifacts to all registries whose resolved IP<br>address is within the subnet described by the CIDR syntax.<br><br>This option is useful when pushing images containing<br>nondistributable artifacts to a registry on an air-gapped network so<br>hosts on that network can pull the images without connecting to<br>another server.<br><br>> **Warning**: Nondistributable artifacts typically have restrictions<br>> on how and where they can be distributed and shared. Only use this<br>> feature to push artifacts to private registries and ensure that you<br>> are in compliance with any terms that cover redistributing<br>> nondistributable artifacts.  <br>**Example** : `[ "::1/128", "127.0.0.0/8" ]`|< string > array|
+|**AllowNondistributableArtifactsHostnames**  <br>*optional*|List of registry hostnames to which nondistributable artifacts can be<br>pushed, using the format `<hostname>[:<port>]` or `<IP address>[:<port>]`.<br><br>Some images (for example, Windows base images) contain artifacts<br>whose distribution is restricted by license. When these images are<br>pushed to a registry, restricted artifacts are not included.<br><br>This configuration override this behavior for the specified<br>registries.<br><br>This option is useful when pushing images containing<br>nondistributable artifacts to a registry on an air-gapped network so<br>hosts on that network can pull the images without connecting to<br>another server.<br><br>> **Warning**: Nondistributable artifacts typically have restrictions<br>> on how and where they can be distributed and shared. Only use this<br>> feature to push artifacts to private registries and ensure that you<br>> are in compliance with any terms that cover redistributing<br>> nondistributable artifacts.  <br>**Example** : `[ "registry.internal.corp.example.com:3000", "[2001:db8:a0b:12f0::1]:443" ]`|< string > array|
+|**IndexConfigs**  <br>*optional*|**Example** : `{<br>  "127.0.0.1:5000" : {<br>    "Name" : "127.0.0.1:5000",<br>    "Mirrors" : [ ],<br>    "Secure" : false,<br>    "Official" : false<br>  },<br>  "[2001:db8:a0b:12f0::1]:80" : {<br>    "Name" : "[2001:db8:a0b:12f0::1]:80",<br>    "Mirrors" : [ ],<br>    "Secure" : false,<br>    "Official" : false<br>  },<br>  "registry.internal.corp.example.com:3000" : {<br>    "Name" : "registry.internal.corp.example.com:3000",<br>    "Mirrors" : [ ],<br>    "Secure" : false,<br>    "Official" : false<br>  }<br>}`|< string, [IndexInfo](#indexinfo) > map|
+|**InsecureRegistryCIDRs**  <br>*optional*|List of IP ranges of insecure registries, using the CIDR syntax<br>([RFC 4632](https://tools.ietf.org/html/4632)). Insecure registries<br>accept un-encrypted (HTTP) and/or untrusted (HTTPS with certificates<br>from unknown CAs) communication.<br><br>By default, local registries (`127.0.0.0/8`) are configured as<br>insecure. All other registries are secure. Communicating with an<br>insecure registry is not possible if the daemon assumes that registry<br>is secure.<br><br>This configuration override this behavior, insecure communication with<br>registries whose resolved IP address is within the subnet described by<br>the CIDR syntax.<br><br>Registries can also be marked insecure by hostname. Those registries<br>are listed under `IndexConfigs` and have their `Secure` field set to<br>`false`.<br><br>> **Warning**: Using this option can be useful when running a local<br>> registry, but introduces security vulnerabilities. This option<br>> should therefore ONLY be used for testing purposes. For increased<br>> security, users should add their CA to their system's list of trusted<br>> CAs instead of enabling this option.  <br>**Example** : `[ "::1/128", "127.0.0.0/8" ]`|< string > array|
+|**Mirrors**  <br>*optional*|List of registry URLs that act as a mirror for the official registry.  <br>**Example** : `[ "https://hub-mirror.corp.example.com:5000/", "https://[2001:db8:a0b:12f0::1]/" ]`|< string > array|
+
+
+<a name="resizeoptions"></a>
+### ResizeOptions
+options of resizing container tty size
+
+
+|Name|Schema|
+|---|---|
+|**Height**  <br>*optional*|integer|
+|**Width**  <br>*optional*|integer|
+
+
 <a name="resources"></a>
 ### Resources
 A container's resources (cgroups config, ulimits, etc)
@@ -1819,8 +2226,8 @@ A container's resources (cgroups config, ulimits, etc)
 |**CgroupParent**  <br>*optional*|Path to `cgroups` under which the container's `cgroup` is created. If the path is not absolute, the path is considered to be relative to the `cgroups` path of the init process. Cgroups are created if they do not already exist.|string|
 |**CpuCount**  <br>*optional*|The number of usable CPUs (Windows only).<br>On Windows Server containers, the processor resource controls are mutually exclusive. The order of precedence is `CPUCount` first, then `CPUShares`, and `CPUPercent` last.|integer (int64)|
 |**CpuPercent**  <br>*optional*|The usable percentage of the available CPUs (Windows only).<br>On Windows Server containers, the processor resource controls are mutually exclusive. The order of precedence is `CPUCount` first, then `CPUShares`, and `CPUPercent` last.|integer (int64)|
-|**CpuPeriod**  <br>*optional*|CPU CFS (Completely Fair Scheduler) period.<br>The length of a CPU period in microseconds.|integer (int64)|
-|**CpuQuota**  <br>*optional*|CPU CFS (Completely Fair Scheduler) quota.<br>Microseconds of CPU time that the container can get in a CPU period."|integer (int64)|
+|**CpuPeriod**  <br>*optional*|CPU CFS (Completely Fair Scheduler) period.<br>The length of a CPU period in microseconds.  <br>**Minimum value** : `1000`  <br>**Maximum value** : `1000000`|integer (int64)|
+|**CpuQuota**  <br>*optional*|CPU CFS (Completely Fair Scheduler) quota.<br>Microseconds of CPU time that the container can get in a CPU period."  <br>**Minimum value** : `1000`|integer (int64)|
 |**CpuRealtimePeriod**  <br>*optional*|The length of a CPU real-time period in microseconds. Set to 0 to allocate no time allocated to real-time tasks.|integer (int64)|
 |**CpuRealtimeRuntime**  <br>*optional*|The length of a CPU real-time runtime in microseconds. Set to 0 to allocate no time allocated to real-time tasks.|integer (int64)|
 |**CpuShares**  <br>*optional*|An integer value representing this container's relative CPU weight versus other containers.|integer|
@@ -1842,7 +2249,7 @@ A container's resources (cgroups config, ulimits, etc)
 |**MemoryWmarkRatio**  <br>*optional*|MemoryWmarkRatio is an integer value representing this container's memory low water mark percentage. <br>The value of memory low water mark is memory.limit_in_bytes * MemoryWmarkRatio. The range is in [0, 100].  <br>**Minimum value** : `0`  <br>**Maximum value** : `100`|integer (int64)|
 |**NanoCPUs**  <br>*optional*|CPU quota in units of 10<sup>-9</sup> CPUs.|integer (int64)|
 |**OomKillDisable**  <br>*optional*|Disable OOM Killer for the container.|boolean|
-|**PidsLimit**  <br>*optional*|Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this paramter support.|integer (int64)|
+|**PidsLimit**  <br>*optional*|Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this parameter support.|integer (int64)|
 |**ScheLatSwitch**  <br>*optional*|ScheLatSwitch enables scheduler latency count in cpuacct  <br>**Minimum value** : `0`  <br>**Maximum value** : `1`|integer (int64)|
 |**Ulimits**  <br>*optional*|A list of resource limits to set in the container. For example: `{"Name": "nofile", "Soft": 1024, "Hard": 2048}`"|< [Ulimits](#resources-ulimits) > array|
 
@@ -1865,6 +2272,22 @@ Define container's restart policy
 |---|---|
 |**MaximumRetryCount**  <br>*optional*|integer|
 |**Name**  <br>*optional*|string|
+
+
+<a name="runtime"></a>
+### Runtime
+Runtime describes an [OCI compliant](https://github.com/opencontainers/runtime-spec)
+runtime.
+
+The runtime is invoked by the daemon via the `containerd` daemon. OCI
+runtimes act as an interface to the Linux kernel namespaces, cgroups,
+and SELinux.
+
+
+|Name|Description|Schema|
+|---|---|---|
+|**path**  <br>*optional*|Name and, optional, path, of the OCI executable binary.<br><br>If the path is omitted, the daemon searches the host's `$PATH` for the<br>binary and uses the first result.  <br>**Example** : `"/usr/local/bin/my-oci-runtime"`|string|
+|**runtimeArgs**  <br>*optional*|List of command-line arguments to pass to the runtime when invoked.  <br>**Example** : `[ "--debug", "--systemd-cgroup=false" ]`|< string > array|
 
 
 <a name="searchresultitem"></a>
@@ -1891,13 +2314,42 @@ The status of the container. For example, "running" or "exited".
 <a name="systeminfo"></a>
 ### SystemInfo
 
-|Name|Schema|
-|---|---|
-|**Architecture**  <br>*optional*|string|
-|**Containers**  <br>*optional*|integer|
-|**ContainersPaused**  <br>*optional*|integer|
-|**ContainersRunning**  <br>*optional*|integer|
-|**ContainersStopped**  <br>*optional*|integer|
+|Name|Description|Schema|
+|---|---|---|
+|**Architecture**  <br>*optional*|Hardware architecture of the host, as returned by the Go runtime<br>(`GOARCH`).<br><br>A full list of possible values can be found in the [Go documentation](https://golang.org/doc/install/source#environment).  <br>**Example** : `"x86_64"`|string|
+|**CgroupDriver**  <br>*optional*|The driver to use for managing cgroups.  <br>**Default** : `"cgroupfs"`  <br>**Example** : `"cgroupfs"`|enum (cgroupfs, systemd)|
+|**ContainerdCommit**  <br>*optional*||[Commit](#commit)|
+|**Containers**  <br>*optional*|Total number of containers on the host.  <br>**Example** : `14`|integer|
+|**ContainersPaused**  <br>*optional*|Number of containers with status `"paused"`.  <br>**Example** : `1`|integer|
+|**ContainersRunning**  <br>*optional*|Number of containers with status `"running"`.  <br>**Example** : `3`|integer|
+|**ContainersStopped**  <br>*optional*|Number of containers with status `"stopped"`.  <br>**Example** : `10`|integer|
+|**Debug**  <br>*optional*|Indicates if the daemon is running in debug-mode / with debug-level logging enabled.  <br>**Example** : `true`|boolean|
+|**DefaultRegistry**  <br>*optional*|default registry can be defined by user.|string|
+|**DefaultRuntime**  <br>*optional*|Name of the default OCI runtime that is used when starting containers.<br>The default can be overridden per-container at create time.  <br>**Default** : `"runc"`  <br>**Example** : `"runc"`|string|
+|**Driver**  <br>*optional*|Name of the storage driver in use.  <br>**Example** : `"overlay2"`|string|
+|**DriverStatus**  <br>*optional*|Information specific to the storage driver, provided as<br>"label" / "value" pairs.<br><br>This information is provided by the storage driver, and formatted<br>in a way consistent with the output of `pouch info` on the command<br>line.<br><br><p><br /></p><br><br>> **Note**: The information returned in this field, including the<br>> formatting of values and labels, should not be considered stable,<br>> and may change without notice.  <br>**Example** : `[ [ "Backing Filesystem", "extfs" ], [ "Supports d_type", "true" ], [ "Native Overlay Diff", "true" ] ]`|< < string > array > array|
+|**ExperimentalBuild**  <br>*optional*|Indicates if experimental features are enabled on the daemon.  <br>**Example** : `true`|boolean|
+|**HttpProxy**  <br>*optional*|HTTP-proxy configured for the daemon. This value is obtained from the<br>[`HTTP_PROXY`](https://www.gnu.org/software/wget/manual/html_node/Proxies.html) environment variable.<br><br>Containers do not automatically inherit this configuration.  <br>**Example** : `"http://user:pass@proxy.corp.example.com:8080"`|string|
+|**HttpsProxy**  <br>*optional*|HTTPS-proxy configured for the daemon. This value is obtained from the<br>[`HTTPS_PROXY`](https://www.gnu.org/software/wget/manual/html_node/Proxies.html) environment variable.<br><br>Containers do not automatically inherit this configuration.  <br>**Example** : `"https://user:pass@proxy.corp.example.com:4443"`|string|
+|**ID**  <br>*optional*|Unique identifier of the daemon.<br><br><p><br /></p><br><br>> **Note**: The format of the ID itself is not part of the API, and<br>> should not be considered stable.  <br>**Example** : `"7TRN:IPZB:QYBB:VPBQ:UMPP:KARE:6ZNR:XE6T:7EWV:PKF4:ZOJD:TPYS"`|string|
+|**Images**  <br>*optional*|Total number of images on the host.<br><br>Both _tagged_ and _untagged_ (dangling) images are counted.  <br>**Example** : `508`|integer|
+|**IndexServerAddress**  <br>*optional*|Address / URL of the index server that is used for image search,<br>and as a default for user authentication.|string|
+|**KernelVersion**  <br>*optional*|Kernel version of the host.<br>On Linux, this information obtained from `uname`.|string|
+|**Labels**  <br>*optional*|User-defined labels (key/value metadata) as set on the daemon.  <br>**Example** : `[ "storage=ssd", "production" ]`|< string > array|
+|**ListenAddresses**  <br>*optional*|List of addresses the pouchd listens on  <br>**Example** : `[ [ "unix:///var/run/pouchd.sock", "tcp://0.0.0.0:4243" ] ]`|< string > array|
+|**LiveRestoreEnabled**  <br>*optional*|Indicates if live restore is enabled.<br>If enabled, containers are kept running when the daemon is shutdown<br>or upon daemon start if running containers are detected.  <br>**Default** : `false`  <br>**Example** : `false`|boolean|
+|**LoggingDriver**  <br>*optional*|The logging driver to use as a default for new containers.|string|
+|**MemTotal**  <br>*optional*|Total amount of physical memory available on the host, in kilobytes (kB).  <br>**Example** : `2095882240`|integer (int64)|
+|**NCPU**  <br>*optional*|The number of logical CPUs usable by the daemon.<br><br>The number of available CPUs is checked by querying the operating<br>system when the daemon starts. Changes to operating system CPU<br>allocation after the daemon is started are not reflected.  <br>**Example** : `4`|integer|
+|**Name**  <br>*optional*|Hostname of the host.  <br>**Example** : `"node5.corp.example.com"`|string|
+|**OSType**  <br>*optional*|Generic type of the operating system of the host, as returned by the<br>Go runtime (`GOOS`).<br><br>Currently returned value is "linux". A full list of<br>possible values can be found in the [Go documentation](https://golang.org/doc/install/source#environment).  <br>**Example** : `"linux"`|string|
+|**OperatingSystem**  <br>*optional*|Name of the host's operating system, for example: "Ubuntu 16.04.2 LTS".  <br>**Example** : `"Alpine Linux v3.5"`|string|
+|**PouchRootDir**  <br>*optional*|Root directory of persistent Pouch state.<br><br>Defaults to `/var/lib/pouch` on Linux.  <br>**Example** : `"/var/lib/pouch"`|string|
+|**RegistryConfig**  <br>*optional*||[RegistryServiceConfig](#registryserviceconfig)|
+|**RuncCommit**  <br>*optional*||[Commit](#commit)|
+|**Runtimes**  <br>*optional*|List of [OCI compliant](https://github.com/opencontainers/runtime-spec)<br>runtimes configured on the daemon. Keys hold the "name" used to<br>reference the runtime.<br><br>The Pouch daemon relies on an OCI compliant runtime (invoked via the<br>`containerd` daemon) as its interface to the Linux kernel namespaces,<br>cgroups, and SELinux.<br><br>The default runtime is `runc`, and automatically configured. Additional<br>runtimes can be configured by the user and will be listed here.  <br>**Example** : `{<br>  "runc" : {<br>    "path" : "pouch-runc"<br>  },<br>  "runc-master" : {<br>    "path" : "/go/bin/runc"<br>  },<br>  "custom" : {<br>    "path" : "/usr/local/bin/my-oci-runtime",<br>    "runtimeArgs" : [ "--debug", "--systemd-cgroup=false" ]<br>  }<br>}`|< string, [Runtime](#runtime) > map|
+|**SecurityOptions**  <br>*optional*|List of security features that are enabled on the daemon, such as<br>apparmor, seccomp, SELinux, and user-namespaces (userns).<br><br>Additional configuration options for each security feature may<br>be present, and are included as a comma-separated list of key/value<br>pairs.  <br>**Example** : `[ "name=apparmor", "name=seccomp,profile=default", "name=selinux", "name=userns" ]`|< string > array|
+|**ServerVersion**  <br>*optional*|Version string of the daemon.  <br>**Example** : `"17.06.0-ce"`|string|
 
 
 <a name="systemversion"></a>
@@ -1942,8 +2394,8 @@ UpdateConfig holds the mutable attributes of a Container. Those attributes can b
 |**CgroupParent**  <br>*optional*|Path to `cgroups` under which the container's `cgroup` is created. If the path is not absolute, the path is considered to be relative to the `cgroups` path of the init process. Cgroups are created if they do not already exist.|string|
 |**CpuCount**  <br>*optional*|The number of usable CPUs (Windows only).<br>On Windows Server containers, the processor resource controls are mutually exclusive. The order of precedence is `CPUCount` first, then `CPUShares`, and `CPUPercent` last.|integer (int64)|
 |**CpuPercent**  <br>*optional*|The usable percentage of the available CPUs (Windows only).<br>On Windows Server containers, the processor resource controls are mutually exclusive. The order of precedence is `CPUCount` first, then `CPUShares`, and `CPUPercent` last.|integer (int64)|
-|**CpuPeriod**  <br>*optional*|CPU CFS (Completely Fair Scheduler) period.<br>The length of a CPU period in microseconds.|integer (int64)|
-|**CpuQuota**  <br>*optional*|CPU CFS (Completely Fair Scheduler) quota.<br>Microseconds of CPU time that the container can get in a CPU period."|integer (int64)|
+|**CpuPeriod**  <br>*optional*|CPU CFS (Completely Fair Scheduler) period.<br>The length of a CPU period in microseconds.  <br>**Minimum value** : `1000`  <br>**Maximum value** : `1000000`|integer (int64)|
+|**CpuQuota**  <br>*optional*|CPU CFS (Completely Fair Scheduler) quota.<br>Microseconds of CPU time that the container can get in a CPU period."  <br>**Minimum value** : `1000`|integer (int64)|
 |**CpuRealtimePeriod**  <br>*optional*|The length of a CPU real-time period in microseconds. Set to 0 to allocate no time allocated to real-time tasks.|integer (int64)|
 |**CpuRealtimeRuntime**  <br>*optional*|The length of a CPU real-time runtime in microseconds. Set to 0 to allocate no time allocated to real-time tasks.|integer (int64)|
 |**CpuShares**  <br>*optional*|An integer value representing this container's relative CPU weight versus other containers.|integer|
@@ -1968,7 +2420,7 @@ UpdateConfig holds the mutable attributes of a Container. Those attributes can b
 |**MemoryWmarkRatio**  <br>*optional*|MemoryWmarkRatio is an integer value representing this container's memory low water mark percentage. <br>The value of memory low water mark is memory.limit_in_bytes * MemoryWmarkRatio. The range is in [0, 100].  <br>**Minimum value** : `0`  <br>**Maximum value** : `100`|integer (int64)|
 |**NanoCPUs**  <br>*optional*|CPU quota in units of 10<sup>-9</sup> CPUs.|integer (int64)|
 |**OomKillDisable**  <br>*optional*|Disable OOM Killer for the container.|boolean|
-|**PidsLimit**  <br>*optional*|Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this paramter support.|integer (int64)|
+|**PidsLimit**  <br>*optional*|Tune a container's pids limit. Set -1 for unlimited. Only on Linux 4.4 does this parameter support.|integer (int64)|
 |**RestartPolicy**  <br>*optional*||[RestartPolicy](#restartpolicy)|
 |**ScheLatSwitch**  <br>*optional*|ScheLatSwitch enables scheduler latency count in cpuacct  <br>**Minimum value** : `0`  <br>**Maximum value** : `1`|integer (int64)|
 |**Ulimits**  <br>*optional*|A list of resource limits to set in the container. For example: `{"Name": "nofile", "Soft": 1024, "Hard": 2048}`"|< [Ulimits](#updateconfig-ulimits) > array|
@@ -1993,7 +2445,7 @@ config used to create a volume
 |**Driver**  <br>*optional*|Name of the volume driver to use.  <br>**Default** : `"local"`|string|
 |**DriverOpts**  <br>*optional*|A mapping of driver options and values. These options are passed directly to the driver and are driver specific.|< string, string > map|
 |**Labels**  <br>*optional*|User-defined key/value metadata.|< string, string > map|
-|**Name**  <br>*optional*|The new volume's name. If not specified, Docker generates a name.|string|
+|**Name**  <br>*optional*|The new volume's name. If not specified, Pouch generates a name.|string|
 
 
 <a name="volumeinfo"></a>

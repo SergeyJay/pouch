@@ -3,9 +3,12 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -63,49 +66,21 @@ func FormatTimeInterval(input int64) (formattedTime string, err error) {
 		return "", errInvalid
 	}
 
-	if diff >= Year {
-		year := int(diff / Year)
-		formattedTime += strconv.Itoa(year) + " year"
-		if year > 1 {
-			formattedTime += "s"
+	timeThresholds := []time.Duration{Year, Month, Week, Day, Hour, Minute, Second}
+	timeNames := []string{"year", "month", "week", "day", "hour", "minute", "second"}
+
+	for i, threshold := range timeThresholds {
+		if diff >= threshold {
+			count := int(diff / threshold)
+			formattedTime += strconv.Itoa(count) + " " + timeNames[i]
+			if count > 1 {
+				formattedTime += "s"
+			}
+			break
 		}
-	} else if diff >= Month {
-		month := int(diff / Month)
-		formattedTime += strconv.Itoa(month) + " month"
-		if month > 1 {
-			formattedTime += "s"
-		}
-	} else if diff >= Week {
-		week := int(diff / Week)
-		formattedTime += strconv.Itoa(week) + " week"
-		if week > 1 {
-			formattedTime += "s"
-		}
-	} else if diff >= Day {
-		day := int(diff / Day)
-		formattedTime += strconv.Itoa(day) + " day"
-		if day > 1 {
-			formattedTime += "s"
-		}
-	} else if diff >= Hour {
-		hour := int(diff / Hour)
-		formattedTime += strconv.Itoa(hour) + " hour"
-		if hour > 1 {
-			formattedTime += "s"
-		}
-	} else if diff >= Minute {
-		minute := int(diff / Minute)
-		formattedTime += strconv.Itoa(minute) + " minute"
-		if minute > 1 {
-			formattedTime += "s"
-		}
-	} else if diff >= Second {
-		second := int(diff / Second)
-		formattedTime += strconv.Itoa(second) + " second"
-		if second > 1 {
-			formattedTime += "s"
-		}
-	} else {
+	}
+
+	if diff < Second {
 		formattedTime += "0 second"
 	}
 
@@ -136,7 +111,7 @@ func Merge(src, dest interface{}) error {
 	destVal := reflect.ValueOf(dest).Elem()
 
 	if destVal.Kind() != reflect.Struct {
-		return fmt.Errorf("merged object type shoule be struct")
+		return fmt.Errorf("merged object type should be struct")
 	}
 
 	srcVal := reflect.ValueOf(src)
@@ -150,7 +125,8 @@ func Merge(src, dest interface{}) error {
 	return doMerge(srcVal, destVal)
 }
 
-// doMerge, begin merge action
+// doMerge, begin merge action, note that we will merge slice type,
+// but we do not validate if slice has duplicate values.
 func doMerge(src, dest reflect.Value) error {
 	if !src.IsValid() || !dest.CanSet() || isEmptyValue(src) {
 		return nil
@@ -170,6 +146,9 @@ func doMerge(src, dest reflect.Value) error {
 				return err
 			}
 		}
+
+	case reflect.Slice:
+		dest.Set(reflect.AppendSlice(dest, src))
 
 	default:
 		dest.Set(src)
@@ -195,4 +174,126 @@ func isEmptyValue(v reflect.Value) bool {
 		return v.IsNil()
 	}
 	return false
+}
+
+// DeDuplicate make a slice with no duplicated elements.
+func DeDuplicate(input []string) []string {
+	if input == nil {
+		return nil
+	}
+	result := []string{}
+	internal := map[string]struct{}{}
+	for _, value := range input {
+		if _, exist := internal[value]; !exist {
+			internal[value] = struct{}{}
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+// FormatErrMsgFunc is a function which used by CombineErrors to
+// format error message
+type FormatErrMsgFunc func(idx int, err error) (string, error)
+
+// CombineErrors is a function which used by Inspect to merge multiple errors
+// into one error.
+func CombineErrors(errs []error, formatErrMsg FormatErrMsgFunc) error {
+	var errMsgs []string
+	for idx, err := range errs {
+		formattedErrMsg, formatError := formatErrMsg(idx, err)
+		if formatError != nil {
+			return fmt.Errorf("Combine errors error: %s", formatError.Error())
+		}
+		errMsgs = append(errMsgs, formattedErrMsg)
+	}
+	combinedErrMsg := strings.Join(errMsgs, "\n")
+	return errors.New(combinedErrMsg)
+}
+
+// Contains check if a interface in a interface slice.
+func Contains(input []interface{}, value interface{}) (bool, error) {
+	if value == nil || len(input) == 0 {
+		return false, nil
+	}
+
+	if reflect.TypeOf(input[0]) != reflect.TypeOf(value) {
+		return false, fmt.Errorf("interface type not equals")
+	}
+
+	switch v := value.(type) {
+	case int, int64, float64, string:
+		for _, v := range input {
+			if v == value {
+				return true, nil
+			}
+		}
+		return false, nil
+	// TODO: add more types
+	default:
+		r := reflect.TypeOf(v)
+		return false, fmt.Errorf("Not support: %s", r)
+	}
+}
+
+// StringInSlice checks if a string in the slice.
+func StringInSlice(input []string, str string) bool {
+	if str == "" || len(input) == 0 {
+		return false
+	}
+
+	result := make([]interface{}, len(input))
+	for i, v := range input {
+		result[i] = v
+	}
+
+	exists, _ := Contains(result, str)
+	return exists
+}
+
+// checkPidfileStatus check if pidfile exist and validate pid exist in /proc, but not validate whether process is running.
+func checkPidfileStatus(path string) error {
+	if pidByte, err := ioutil.ReadFile(path); err == nil {
+		if _, err := os.Stat("/proc/" + string(pidByte)); err == nil {
+			return fmt.Errorf("found daemon pid %s, check it status", string(pidByte))
+		}
+	}
+
+	return nil
+}
+
+// NewPidfile checks if pidfile exist, and saves daemon pid.
+func NewPidfile(path string) error {
+	if err := checkPidfileStatus(path); err != nil {
+		return err
+	}
+	return ioutil.WriteFile(path, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+}
+
+// IsProcessAlive returns true if process with a given pid is running.
+func IsProcessAlive(pid int) bool {
+	err := syscall.Kill(pid, syscall.Signal(0))
+	if err == nil || err == syscall.EPERM {
+		return true
+	}
+
+	return false
+}
+
+// KillProcess force-stops a process.
+func KillProcess(pid int) {
+	syscall.Kill(pid, syscall.SIGKILL)
+}
+
+// SetOOMScore sets process's oom_score value
+// The higher the value of oom_score of any process, the higher is its
+// likelihood of getting killed by the OOM Killer in an out-of-memory situation.
+func SetOOMScore(pid, score int) error {
+	f, err := os.OpenFile(fmt.Sprintf("/proc/%d/oom_score_adj", pid), os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(strconv.Itoa(score))
+	f.Close()
+	return err
 }
