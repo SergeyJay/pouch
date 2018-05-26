@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/alibaba/pouch/apis/types"
@@ -15,7 +16,9 @@ import (
 	"github.com/alibaba/pouch/pkg/utils"
 
 	"github.com/containerd/containerd"
+	ctrdmetaimages "github.com/containerd/containerd/images"
 	digest "github.com/opencontainers/go-digest"
+	pkgerrors "github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
@@ -26,17 +29,20 @@ type ImageMgr interface {
 	// PullImage pulls images from specified registry.
 	PullImage(ctx context.Context, ref string, authConfig *types.AuthConfig, out io.Writer) error
 
+	// GetImage returns imageInfo by reference or id.
+	GetImage(ctx context.Context, idOrRef string) (*types.ImageInfo, error)
+
 	// ListImages lists images stored by containerd.
 	ListImages(ctx context.Context, filter ...string) ([]types.ImageInfo, error)
 
 	// Search Images from specified registry.
 	SearchImages(ctx context.Context, name string, registry string) ([]types.SearchResultItem, error)
 
-	// GetImage returns imageInfo by reference or id.
-	GetImage(ctx context.Context, idOrRef string) (*types.ImageInfo, error)
-
 	// RemoveImage deletes an image by reference.
 	RemoveImage(ctx context.Context, idOrRef string, force bool) error
+
+	// AddTag creates target ref for source image.
+	AddTag(ctx context.Context, sourceImage string, targetRef string) error
 
 	// CheckReference returns imageID, actual reference and primary reference.
 	CheckReference(ctx context.Context, idOrRef string) (digest.Digest, reference.Named, reference.Named, error)
@@ -81,80 +87,6 @@ func NewImageManager(cfg *config.Config, client ctrd.APIClient) (*ImageManager, 
 	return mgr, nil
 }
 
-// CheckReference returns image ID and actual reference.
-func (mgr *ImageManager) CheckReference(ctx context.Context, idOrRef string) (actualID digest.Digest, actualRef reference.Named, primaryRef reference.Named, err error) {
-	var namedRef reference.Named
-
-	namedRef, err = reference.Parse(idOrRef)
-	if err != nil {
-		return
-	}
-
-	// NOTE: we cannot add default registry for the idOrRef directly
-	// because the idOrRef maybe short ID or ID. we should run search
-	// without addDefaultRegistryIfMissing at first round.
-	actualID, actualRef, err = mgr.localStore.Search(namedRef)
-	if err != nil {
-		if !errtypes.IsNotfound(err) {
-			return
-		}
-
-		newIDOrRef := addDefaultRegistryIfMissing(idOrRef, mgr.DefaultRegistry, mgr.DefaultNamespace)
-		if newIDOrRef == idOrRef {
-			return
-		}
-
-		// ideally, the err should be nil
-		namedRef, err = reference.Parse(newIDOrRef)
-		if err != nil {
-			return
-		}
-
-		actualID, actualRef, err = mgr.localStore.Search(namedRef)
-		if err != nil {
-			return
-		}
-	}
-
-	// NOTE: if the actualRef is short ID or ID, the primaryRef is first one of
-	// primary reference
-	if reference.IsNamedOnly(actualRef) {
-		refs := mgr.localStore.GetPrimaryReferences(actualID)
-		if len(refs) == 0 {
-			err = errtypes.ErrNotfound
-			logrus.Errorf("one Image ID must have the primary references, but got nothing")
-			return
-		}
-
-		primaryRef = refs[0]
-	} else {
-		primaryRef, err = mgr.localStore.GetPrimaryReference(actualRef)
-		if err != nil {
-			return
-		}
-	}
-	return
-}
-
-// GetImage returns imageInfo by reference.
-func (mgr *ImageManager) GetImage(ctx context.Context, idOrRef string) (*types.ImageInfo, error) {
-	_, _, ref, err := mgr.CheckReference(ctx, idOrRef)
-	if err != nil {
-		return nil, err
-	}
-
-	img, err := mgr.client.GetImage(ctx, ref.String())
-	if err != nil {
-		return nil, err
-	}
-
-	imgInfo, err := mgr.containerdImageToImageInfo(ctx, img)
-	if err != nil {
-		return nil, err
-	}
-	return &imgInfo, nil
-}
-
 // PullImage pulls images from specified registry.
 func (mgr *ImageManager) PullImage(ctx context.Context, ref string, authConfig *types.AuthConfig, out io.Writer) error {
 	newRef := addDefaultRegistryIfMissing(ref, mgr.DefaultRegistry, mgr.DefaultNamespace)
@@ -183,6 +115,25 @@ func (mgr *ImageManager) PullImage(ctx context.Context, ref string, authConfig *
 	}
 
 	return mgr.storeImageReference(ctx, img)
+}
+
+// GetImage returns imageInfo by reference.
+func (mgr *ImageManager) GetImage(ctx context.Context, idOrRef string) (*types.ImageInfo, error) {
+	_, _, ref, err := mgr.CheckReference(ctx, idOrRef)
+	if err != nil {
+		return nil, err
+	}
+
+	img, err := mgr.client.GetImage(ctx, ref.String())
+	if err != nil {
+		return nil, err
+	}
+
+	imgInfo, err := mgr.containerdImageToImageInfo(ctx, img)
+	if err != nil {
+		return nil, err
+	}
+	return &imgInfo, nil
 }
 
 // ListImages lists images stored by containerd.
@@ -233,8 +184,11 @@ func (mgr *ImageManager) RemoveImage(ctx context.Context, idOrRef string, force 
 		return err
 	}
 
-	// should remove all the references if the reference is Named Only
-	if reference.IsNamedOnly(namedRef) {
+	// should remove all the references if the reference is ID (Named Only)
+	// or Digest ID (Tagged Named)
+	if reference.IsNamedOnly(namedRef) ||
+		strings.HasPrefix(id.String(), namedRef.String()) {
+
 		// NOTE: the user maybe use the following references to pull one image
 		//
 		//	busybox:1.25
@@ -277,6 +231,108 @@ func (mgr *ImageManager) RemoveImage(ctx context.Context, idOrRef string, force 
 	return mgr.localStore.RemoveReference(id, namedRef)
 }
 
+// AddTag adds the tag reference to the source image.
+//
+// NOTE(fuwei): AddTag hacks the containerd metadata boltdb, which we add the
+// reference into the containerd metadata boltdb with the existing image content.
+// It means that the "tag" is primary reference in the pouchd.
+//
+// For example,
+//	pouch tag A B
+//	pouch rmi A
+//
+// The B is still there.
+func (mgr *ImageManager) AddTag(ctx context.Context, sourceImage string, targetTag string) error {
+	targetTag = addDefaultRegistryIfMissing(targetTag, mgr.DefaultRegistry, mgr.DefaultNamespace)
+
+	tagRef, err := parseTagReference(targetTag)
+	if err != nil {
+		return err
+	}
+
+	if err := mgr.validateTagReference(tagRef); err != nil {
+		return err
+	}
+
+	ctrdImg, err := mgr.fetchContainerdImage(ctx, sourceImage)
+	if err != nil {
+		return err
+	}
+
+	// add the reference into memory
+	cfg, err := ctrdImg.Config(ctx)
+	if err != nil {
+		return err
+	}
+	if err := mgr.addReferenceIntoStore(cfg.Digest, tagRef, ctrdImg.Target().Digest); err != nil {
+		return err
+	}
+
+	// add the reference into containerd meta db
+	_, err = mgr.client.CreateImageReference(ctx, ctrdmetaimages.Image{
+		Name:   tagRef.String(),
+		Target: ctrdImg.Target(),
+	})
+	return err
+}
+
+// CheckReference returns image ID and actual reference.
+func (mgr *ImageManager) CheckReference(ctx context.Context, idOrRef string) (actualID digest.Digest, actualRef reference.Named, primaryRef reference.Named, err error) {
+	var namedRef reference.Named
+
+	namedRef, err = reference.Parse(idOrRef)
+	if err != nil {
+		return
+	}
+
+	// NOTE: we cannot add default registry for the idOrRef directly
+	// because the idOrRef maybe short ID or ID. we should run search
+	// without addDefaultRegistryIfMissing at first round.
+	actualID, actualRef, err = mgr.localStore.Search(namedRef)
+	if err != nil {
+		if !errtypes.IsNotfound(err) {
+			return
+		}
+
+		newIDOrRef := addDefaultRegistryIfMissing(idOrRef, mgr.DefaultRegistry, mgr.DefaultNamespace)
+		if newIDOrRef == idOrRef {
+			return
+		}
+
+		// ideally, the err should be nil
+		namedRef, err = reference.Parse(newIDOrRef)
+		if err != nil {
+			return
+		}
+
+		actualID, actualRef, err = mgr.localStore.Search(namedRef)
+		if err != nil {
+			return
+		}
+	}
+
+	// NOTE: if the actualRef is ID (Named Only) or Digest ID (Tagged Named)
+	// the primaryRef is first one of primary reference
+	if reference.IsNamedOnly(actualRef) ||
+		strings.HasPrefix(actualID.String(), actualRef.String()) {
+
+		refs := mgr.localStore.GetPrimaryReferences(actualID)
+		if len(refs) == 0 {
+			err = errtypes.ErrNotfound
+			logrus.Errorf("one Image ID must have the primary references, but got nothing")
+			return
+		}
+
+		primaryRef = refs[0]
+	} else {
+		primaryRef, err = mgr.localStore.GetPrimaryReference(actualRef)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
 // updateLocalStore updates the local store.
 func (mgr *ImageManager) updateLocalStore() error {
 	ctx, cancel := context.WithTimeout(context.Background(), deadlineLoadImagesAtBootup)
@@ -306,20 +362,24 @@ func (mgr *ImageManager) storeImageReference(ctx context.Context, img containerd
 		return err
 	}
 
+	return mgr.addReferenceIntoStore(imgCfg.Digest, namedRef, img.Target().Digest)
+}
+
+func (mgr *ImageManager) addReferenceIntoStore(id digest.Digest, ref reference.Named, dig digest.Digest) error {
 	// add primary reference as searchable reference
-	if err := mgr.localStore.AddReference(imgCfg.Digest, namedRef, namedRef); err != nil {
+	if err := mgr.localStore.AddReference(id, ref, ref); err != nil {
 		return err
 	}
 
 	// add Name@Digest as searchable reference if the primary reference is Name:Tag
-	if reference.IsNameTagged(namedRef) {
+	if reference.IsNameTagged(ref) {
 		// NOTE: The digest reference must be primary reference.
 		// If the digest reference has been exist, it means that the
 		// same image has been pulled successfully.
-		digRef := reference.WithDigest(namedRef, img.Target().Digest)
+		digRef := reference.WithDigest(ref, dig)
 		if _, _, err := mgr.localStore.Search(digRef); err != nil {
 			if errtypes.IsNotfound(err) {
-				return mgr.localStore.AddReference(imgCfg.Digest, namedRef, digRef)
+				return mgr.localStore.AddReference(id, ref, digRef)
 			}
 		}
 	}
@@ -370,4 +430,45 @@ func (mgr *ImageManager) containerdImageToImageInfo(ctx context.Context, img con
 		},
 		Size: size,
 	}, nil
+}
+
+func (mgr *ImageManager) fetchContainerdImage(ctx context.Context, idOrRef string) (containerd.Image, error) {
+	_, _, ref, err := mgr.CheckReference(ctx, idOrRef)
+	if err != nil {
+		return nil, err
+	}
+
+	return mgr.client.GetImage(ctx, ref.String())
+}
+
+func (mgr *ImageManager) validateTagReference(ref reference.Named) error {
+	if _, ok := ref.(reference.Digested); ok {
+		return pkgerrors.Wrap(
+			errtypes.ErrInvalidParam,
+			fmt.Sprintf("target tag reference (%s) cannot contains any digest information", ref.String()),
+		)
+	}
+
+	// NOTE: we don't allow to use tag to override the existing primary reference.
+	pRef, err := mgr.localStore.GetPrimaryReference(ref)
+	if err != nil {
+		return nil
+	}
+
+	if pRef.String() == ref.String() {
+		return pkgerrors.Wrap(
+			errtypes.ErrInvalidParam,
+			fmt.Sprintf("the tag reference (%s) has been used as reference", ref.String()),
+		)
+	}
+	return nil
+}
+
+func parseTagReference(targetTag string) (reference.Named, error) {
+	ref, err := reference.Parse(targetTag)
+	if err != nil {
+		return nil, pkgerrors.Wrap(errtypes.ErrInvalidParam, err.Error())
+	}
+
+	return reference.WithDefaultTagIfMissing(ref), nil
 }

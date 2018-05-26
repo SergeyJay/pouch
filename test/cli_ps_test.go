@@ -37,7 +37,7 @@ func (suite *PouchPsSuite) TearDownTest(c *check.C) {
 // TODO: check more value, like id/runtime.
 func (suite *PouchPsSuite) TestPsWorks(c *check.C) {
 	name := "ps-normal"
-
+	defer DelContainerForceMultyTime(c, name)
 	// create
 	{
 		command.PouchRun("create", "--name", name, busyboxImage, "top").Assert(c, icmd.Success)
@@ -69,14 +69,13 @@ func (suite *PouchPsSuite) TestPsWorks(c *check.C) {
 		c.Assert(kv[name].status[0], check.Equals, "Stopped")
 	}
 
-	defer DelContainerForceMultyTime(c, name)
 }
 
 // TestPsAll tests "pouch ps -a" work
 func (suite *PouchPsSuite) TestPsAll(c *check.C) {
 	name := "ps-all"
 
-	command.PouchRun("create", "--name", name, busyboxImage).Assert(c, icmd.Success)
+	command.PouchRun("create", "--name", name, busyboxImage, "top").Assert(c, icmd.Success)
 	defer DelContainerForceMultyTime(c, name)
 
 	res := command.PouchRun("ps").Assert(c, icmd.Success)
@@ -95,7 +94,7 @@ func (suite *PouchPsSuite) TestPsAll(c *check.C) {
 func (suite *PouchPsSuite) TestPsQuiet(c *check.C) {
 	name := "ps-quiet"
 
-	command.PouchRun("create", "--name", name, busyboxImage).Assert(c, icmd.Success)
+	command.PouchRun("create", "--name", name, busyboxImage, "top").Assert(c, icmd.Success)
 	defer DelContainerForceMultyTime(c, name)
 
 	res := command.PouchRun("ps", "-q", "-a").Assert(c, icmd.Success)
@@ -113,7 +112,7 @@ func (suite *PouchPsSuite) TestPsQuiet(c *check.C) {
 func (suite *PouchPsSuite) TestPsNoTrunc(c *check.C) {
 	name := "ps-noTrunc"
 
-	command.PouchRun("create", "--name", name, busyboxImage).Assert(c, icmd.Success)
+	command.PouchRun("create", "--name", name, busyboxImage, "top").Assert(c, icmd.Success)
 	defer DelContainerForceMultyTime(c, name)
 
 	command.PouchRun("start", name).Assert(c, icmd.Success)

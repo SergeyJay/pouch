@@ -72,6 +72,7 @@ func setupFlags(cmd *cobra.Command) {
 	flagSet.StringVar(&cfg.HomeDir, "home-dir", "/var/lib/pouch", "Specify root dir of pouchd")
 	flagSet.StringArrayVarP(&cfg.Listen, "listen", "l", []string{"unix:///var/run/pouchd.sock"}, "Specify listening addresses of Pouchd")
 	flagSet.BoolVar(&cfg.IsCriEnabled, "enable-cri", false, "Specify whether enable the cri part of pouchd which is used to support Kubernetes")
+	flagSet.StringVar(&cfg.CriConfig.CriVersion, "cri-version", "v1alpha2", "Specify the version of cri which is used to support Kubernetes")
 	flagSet.StringVar(&cfg.CriConfig.Listen, "listen-cri", "/var/run/pouchcri.sock", "Specify listening address of CRI")
 	flagSet.StringVar(&cfg.CriConfig.NetworkPluginBinDir, "cni-bin-dir", "/opt/cni/bin", "The directory for putting cni plugin binaries.")
 	flagSet.StringVar(&cfg.CriConfig.NetworkPluginConfDir, "cni-conf-dir", "/etc/cni/net.d", "The directory for putting cni plugin configuration files.")
@@ -122,7 +123,7 @@ func parseFlags(cmd *cobra.Command, flags []string) {
 func runDaemon() error {
 	//user specifies --version or -v, print version and return.
 	if printVersion {
-		fmt.Println(version.Version)
+		fmt.Printf("pouchd version: %s, build: %s, build at: %s\n", version.Version, version.GitCommit, version.BuildTime)
 		return nil
 	}
 
@@ -154,15 +155,17 @@ func runDaemon() error {
 	}
 
 	// saves daemon pid to pidfile.
-	if err := utils.NewPidfile(cfg.Pidfile); err != nil {
-		logrus.Errorf("failed to create pidfile: %s", err)
-		return err
-	}
-	defer func() {
-		if err := os.Remove(cfg.Pidfile); err != nil {
-			logrus.Errorf("failed to delete pidfile: %s", err)
+	if cfg.Pidfile != "" {
+		if err := utils.NewPidfile(cfg.Pidfile); err != nil {
+			logrus.Errorf("failed to create pidfile: %s", err)
+			return err
 		}
-	}()
+		defer func() {
+			if err := os.Remove(cfg.Pidfile); err != nil {
+				logrus.Errorf("failed to delete pidfile: %s", err)
+			}
+		}()
+	}
 
 	// set pouchd oom-score
 	if err := utils.SetOOMScore(os.Getpid(), cfg.OOMScoreAdjust); err != nil {
@@ -181,12 +184,26 @@ func runDaemon() error {
 
 	// initialize signal and handle method.
 	var (
-		waitExit = make(chan struct{})
-		signals  = make(chan os.Signal, 1)
+		errCh    = make(chan error, 1)
+		signalCh = make(chan os.Signal, 1)
 	)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
+
+	// new daemon instance, this is core.
+	d := daemon.NewDaemon(cfg)
+	if d == nil {
+		return fmt.Errorf("failed to new daemon")
+	}
+
+	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGQUIT, syscall.SIGTERM, syscall.SIGHUP)
+	sigHandles = append(sigHandles, d.ShutdownPlugin, d.Shutdown)
+
 	go func() {
-		sig := <-signals
+		// FIXME: I think the Run() should always return error.
+		errCh <- d.Run()
+	}()
+
+	select {
+	case sig := <-signalCh:
 		logrus.Warnf("received signal: %s", sig)
 
 		for _, handle := range sigHandles {
@@ -195,23 +212,12 @@ func runDaemon() error {
 			}
 		}
 
-		close(waitExit)
 		os.Exit(1)
-	}()
-
-	// new daemon instance, this is core.
-	d := daemon.NewDaemon(cfg)
-	if d == nil {
-		return fmt.Errorf("failed to new daemon")
+	case err := <-errCh:
+		// FIXME: should we do the cleanup like signal handle?
+		return err
 	}
-
-	sigHandles = append(sigHandles, d.ShutdownPlugin, d.Shutdown)
-
-	err := d.Run()
-
-	<-waitExit
-
-	return err
+	return nil
 }
 
 // initLog initializes log Level and log format of daemon.

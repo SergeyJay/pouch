@@ -88,12 +88,23 @@ GOROOT=/usr/local/go
 GOPATH=/go
 ```
 
-Then copy or clone or link pouch source code to the GOPATH：
+Then copy or clone pouch source code to the GOPATH：
 
 ```
 # pwd
 /go/src/github.com/alibaba/pouch
 ```
+
+The following steps are also needed to make sure libnetwork package could be found:
+
+```
+BUILDPATH=/tmp/pouchbuild
+mkdir -p $BUILDPATH/src/github.com/docker
+cp -r /go/src/github.com/alibaba/pouch/extra/libnetwork $BUILDPATH/src/github.com/docker/libnetwork
+export GOPATH=$GOPATH:$BUILDPATH:$BUILDPATH/src/github.com/docker/libnetwork/Godeps/_workspace
+```
+
+And please notice that files in `/tmp` directory may be deleted after reboot.
 
 Now you could run unit test as following:
 
@@ -111,7 +122,7 @@ ok      github.com/alibaba/pouch/client    0.094s
 
 There are more works to do for integration test compared with unit test.
 
-First you need to make sure `pouch` and `pouchd` binary is installed or builded.
+First you need to make sure `pouch` and `pouchd` binary is installed or built.
 
 Then you need to install containerd, runc, lxcfs and so on. You could refer to function `install_pouch` in `hack/make.sh`. There is also a quick way to install them, just install `pouch` package then replace pouch binary with yours.
 

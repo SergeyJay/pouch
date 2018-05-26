@@ -35,7 +35,7 @@ const (
 )
 
 // Setup linux-platform-sepecific specification.
-func populatePlatform(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+func populatePlatform(ctx context.Context, c *Container, specWrapper *SpecWrapper) error {
 	s := specWrapper.s
 	if s.Linux == nil {
 		s.Linux = &specs.Linux{}
@@ -90,7 +90,7 @@ func populatePlatform(ctx context.Context, c *ContainerMeta, specWrapper *SpecWr
 }
 
 // setupSeccomp creates seccomp security settings spec.
-func setupSeccomp(ctx context.Context, c *ContainerMeta, s *specs.Spec) error {
+func setupSeccomp(ctx context.Context, c *Container, s *specs.Spec) error {
 	if c.HostConfig.Privileged {
 		return nil
 	}
@@ -121,7 +121,7 @@ func setupSeccomp(ctx context.Context, c *ContainerMeta, s *specs.Spec) error {
 }
 
 // setupResource creates linux resource spec.
-func setupResource(ctx context.Context, c *ContainerMeta, s *specs.Spec) error {
+func setupResource(ctx context.Context, c *Container, s *specs.Spec) error {
 	if s.Linux.Resources == nil {
 		s.Linux.Resources = &specs.LinuxResources{}
 	}
@@ -140,7 +140,10 @@ func setupResource(ctx context.Context, c *ContainerMeta, s *specs.Spec) error {
 		return err
 	}
 
-	//TODO: nedd support Pids, HugepageLimits, Network cgroup set
+	// start to setup pids limit
+	s.Linux.Resources.Pids = &specs.LinuxPids{
+		Limit: c.HostConfig.PidsLimit,
+	}
 
 	return nil
 }
@@ -272,7 +275,7 @@ func setupMemory(ctx context.Context, r types.Resources, s *specs.Spec) {
 }
 
 // setupResource creates linux device resource spec.
-func setupDevices(ctx context.Context, c *ContainerMeta, s *specs.Spec) error {
+func setupDevices(ctx context.Context, c *Container, s *specs.Spec) error {
 	var devs []specs.LinuxDevice
 	devPermissions := s.Linux.Resources.Devices
 	if c.HostConfig.Privileged {
@@ -384,7 +387,7 @@ func devicesFromPath(pathOnHost, pathInContainer, cgroupPermissions string) (dev
 }
 
 // setupNamespaces creates linux namespaces spec.
-func setupNamespaces(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+func setupNamespaces(ctx context.Context, c *Container, specWrapper *SpecWrapper) error {
 	// create user namespace spec
 	if err := setupUserNamespace(ctx, c, specWrapper); err != nil {
 		return err
@@ -461,7 +464,7 @@ func connectedContainer(mode string) string {
 	return ""
 }
 
-func getIpcContainer(ctx context.Context, mgr ContainerMgr, id string) (*ContainerMeta, error) {
+func getIpcContainer(ctx context.Context, mgr ContainerMgr, id string) (*Container, error) {
 	// Check whether the container exists.
 	c, err := mgr.Get(ctx, id)
 	if err != nil {
@@ -475,7 +478,7 @@ func getIpcContainer(ctx context.Context, mgr ContainerMgr, id string) (*Contain
 	return c, nil
 }
 
-func getPidContainer(ctx context.Context, mgr ContainerMgr, id string) (*ContainerMeta, error) {
+func getPidContainer(ctx context.Context, mgr ContainerMgr, id string) (*Container, error) {
 	// Check the container exists.
 	c, err := mgr.Get(ctx, id)
 	if err != nil {
@@ -488,11 +491,11 @@ func getPidContainer(ctx context.Context, mgr ContainerMgr, id string) (*Contain
 }
 
 // TODO
-func setupUserNamespace(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+func setupUserNamespace(ctx context.Context, c *Container, specWrapper *SpecWrapper) error {
 	return nil
 }
 
-func setupNetworkNamespace(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+func setupNetworkNamespace(ctx context.Context, c *Container, specWrapper *SpecWrapper) error {
 	if c.Config.NetworkDisabled {
 		return nil
 	}
@@ -535,7 +538,7 @@ func setupNetworkNamespace(ctx context.Context, c *ContainerMeta, specWrapper *S
 	return nil
 }
 
-func setupIpcNamespace(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+func setupIpcNamespace(ctx context.Context, c *Container, specWrapper *SpecWrapper) error {
 	s := specWrapper.s
 	ipcMode := c.HostConfig.IpcMode
 	switch {
@@ -556,7 +559,7 @@ func setupIpcNamespace(ctx context.Context, c *ContainerMeta, specWrapper *SpecW
 	return nil
 }
 
-func setupPidNamespace(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+func setupPidNamespace(ctx context.Context, c *Container, specWrapper *SpecWrapper) error {
 	s := specWrapper.s
 	pidMode := c.HostConfig.PidMode
 	switch {
@@ -577,7 +580,7 @@ func setupPidNamespace(ctx context.Context, c *ContainerMeta, specWrapper *SpecW
 	return nil
 }
 
-func setupUtsNamespace(ctx context.Context, c *ContainerMeta, specWrapper *SpecWrapper) error {
+func setupUtsNamespace(ctx context.Context, c *Container, specWrapper *SpecWrapper) error {
 	s := specWrapper.s
 	utsMode := c.HostConfig.UTSMode
 	switch {

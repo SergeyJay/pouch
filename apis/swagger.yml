@@ -265,6 +265,34 @@ paths:
         500:
           $ref: "#/responses/500ErrorResponse"
 
+  /images/{imageid}/tag:
+    post:
+      summary: "Tag an image"
+      description: "Add tag reference to the existing image"
+      parameters:
+        - $ref: "#/parameters/imageid"
+        - name: "repo"
+          in: "query"
+          description: "The repository to tag in. For example, `someuser/someimage`."
+          type: "string"
+        - name: "tag"
+          in: "query"
+          description: "The name of the new tag."
+          type: "string"
+      responses:
+        201:
+          description: "No error"
+        400:
+          description: "Bad parameter"
+          schema:
+            $ref: "#/definitions/Error"
+        404:
+          description: "no such image"
+          schema:
+            $ref: "#/definitions/Error"
+        500:
+          $ref: "#/responses/500ErrorResponse"
+
   /images/{imageid}:
     delete:
       summary: "Remove an image"
@@ -586,6 +614,10 @@ paths:
           description: "logs returned as a string in response body"
           schema:
             type: "string"
+        400:
+          description: "bad parameter"
+          schema:
+            $ref: "#/definitions/Error"
         404:
           $ref: "#/responses/404ErrorResponse"
         500:
@@ -1279,6 +1311,13 @@ definitions:
         description: |
           The logging driver to use as a default for new containers.
         type: "string"
+      VolumeDrivers:
+        description: |
+          The list of volume drivers which the pouchd supports
+        type: "array"
+        items:
+          type: "string"
+        example: ["local", "tmpfs"]
       CgroupDriver:
         description: |
           The driver to use for managing cgroups.
@@ -1904,25 +1943,9 @@ definitions:
             type: "string"
             description: "Path to a file where the container ID is written"
           LogConfig:
-            type: "object"
             description: "The logging configuration for this container"
-            properties:
-              Type:
-                type: "string"
-                enum:
-                  - "json-file"
-                  - "syslog"
-                  - "journald"
-                  - "gelf"
-                  - "fluentd"
-                  - "awslogs"
-                  - "splunk"
-                  - "etwlogs"
-                  - "none"
-              Config:
-                type: "object"
-                additionalProperties:
-                  type: "string"
+            type: "object"
+            $ref: "#/definitions/LogConfig"
           RestartPolicy:
             type: "object"
             description: "Restart policy to be used to manage the container"
@@ -2131,6 +2154,29 @@ definitions:
           HostConfig:
             $ref: "#/definitions/HostConfig"
 
+  LogConfig:
+    description: "The logging configuration for this container"
+    type: "object"
+    properties:
+      Type:
+        type: "string"
+        x-go-name: "LogDriver"
+        enum:
+          - "json-file"
+          - "syslog"
+          - "journald"
+          - "gelf"
+          - "fluentd"
+          - "awslogs"
+          - "splunk"
+          - "etwlogs"
+          - "none"
+      Config:
+        type: "object"
+        x-go-name: "LogOpts"
+        additionalProperties:
+          type: "string"
+
   Resources:
     description: "A container's resources (cgroups config, ulimits, etc)"
     type: "object"
@@ -2148,7 +2194,7 @@ definitions:
         description: "Path to `cgroups` under which the container's `cgroup` is created. If the path is not absolute, the path is considered to be relative to the `cgroups` path of the init process. Cgroups are created if they do not already exist."
         type: "string"
       BlkioWeight:
-        description: "Block IO weight (relative weight)."
+        description: "Block IO weight (relative weight), need CFQ IO Scheduler enable."
         type: "integer"
         format: "uint16"
         x-nullable: false
@@ -2883,7 +2929,10 @@ definitions:
       AppArmorProfile:
         type: "string"
       ExecIDs:
-        type: "string"
+        description: "exec ids of container"
+        type: "array"
+        items:
+          type: "string"
       HostConfig:
         $ref: "#/definitions/HostConfig"
       SizeRw:

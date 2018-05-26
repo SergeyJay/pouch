@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"reflect"
 	"strconv"
@@ -87,6 +88,39 @@ func FormatTimeInterval(input int64) (formattedTime string, err error) {
 	return formattedTime, nil
 }
 
+// ParseTimestamp returns seconds and nanoseconds.
+//
+// 1. If the value is empty, it will return default second, the second arg.
+// 2. If the incoming nanosecond portion is longer or shorter than 9 digits,
+//	it will be converted into 9 digits nanoseconds.
+func ParseTimestamp(value string, defaultSec int64) (int64, int64, error) {
+	if value == "" {
+		return defaultSec, 0, nil
+	}
+
+	vs := strings.SplitN(value, ".", 2)
+
+	// for second
+	s, err := strconv.ParseInt(vs[0], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	if len(vs) != 2 {
+		return s, 0, nil
+	}
+
+	// for nanoseconds
+	n, err := strconv.ParseInt(vs[1], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// convert the n into 9 digits
+	n = int64(float64(n) * math.Pow(float64(10), float64(9-len(vs[1]))))
+	return s, n, nil
+}
+
 // TruncateID is used to transfer image ID from digest to short ID.
 func TruncateID(id string) string {
 	var shortLen = 12
@@ -142,9 +176,14 @@ func doMerge(src, dest reflect.Value) error {
 
 	case reflect.Map:
 		for _, key := range src.MapKeys() {
-			if err := doMerge(src.MapIndex(key), dest.MapIndex(key)); err != nil {
-				return err
+			srcElem := src.MapIndex(key)
+			if !srcElem.IsValid() || isEmptyValue(srcElem) {
+				continue
 			}
+			if dest.IsNil() {
+				dest.Set(reflect.MakeMap(dest.Type()))
+			}
+			dest.SetMapIndex(key, srcElem)
 		}
 
 	case reflect.Slice:

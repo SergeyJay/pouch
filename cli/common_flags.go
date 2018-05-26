@@ -10,7 +10,7 @@ func addCommonFlags(flagSet *pflag.FlagSet) *container {
 	// please add the following flag by name in alphabetical order
 	// blkio
 	flagSet.Uint16Var(&c.blkioWeight, "blkio-weight", 0, "Block IO (relative weight), between 10 and 1000, or 0 to disable")
-	flagSet.Var(&c.blkioWeightDevice, "blkio-weight-device", "Block IO weight (relative device weight)")
+	flagSet.Var(&c.blkioWeightDevice, "blkio-weight-device", "Block IO weight (relative device weight), need CFQ IO Scheduler enable")
 	flagSet.Var(&c.blkioDeviceReadBps, "device-read-bps", "Limit read rate (bytes per second) from a device")
 	flagSet.Var(&c.blkioDeviceReadIOps, "device-read-iops", "Limit read rate (IO per second) from a device")
 	flagSet.Var(&c.blkioDeviceWriteBps, "device-write-bps", "Limit write rate (bytes per second) from a device")
@@ -84,13 +84,14 @@ func addCommonFlags(flagSet *pflag.FlagSet) *container {
 
 	flagSet.StringVarP(&c.workdir, "workdir", "w", "", "Set the working directory in a container")
 	flagSet.Var(&c.ulimit, "ulimit", "Set container ulimit")
+	flagSet.Int64Var(&c.pidsLimit, "pids-limit", 0, "Set container pids limit")
 
 	flagSet.BoolVar(&c.rich, "rich", false, "Start container in rich container mode. (default false)")
 	flagSet.StringVar(&c.richMode, "rich-mode", "", "Choose one rich container mode. dumb-init(default), systemd, sbin-init")
 	flagSet.StringVar(&c.initScript, "initscript", "", "Initial script executed in container")
 
 	// cgroup
-	flagSet.StringVarP(&c.cgroupParent, "cgroup-parent", "", "default", "Optional parent cgroup for the container")
+	flagSet.StringVarP(&c.cgroupParent, "cgroup-parent", "", "", "Optional parent cgroup for the container")
 
 	// disk quota
 	flagSet.StringSliceVar(&c.diskQuota, "disk-quota", nil, "Set disk quota for container")

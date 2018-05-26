@@ -54,17 +54,6 @@ func (s *Server) pullImage(ctx context.Context, rw http.ResponseWriter, req *htt
 	return nil
 }
 
-func (s *Server) listImages(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
-	filters := req.FormValue("filters")
-
-	imageList, err := s.ImageMgr.ListImages(ctx, filters)
-	if err != nil {
-		logrus.Errorf("failed to list images: %v", err)
-		return err
-	}
-	return EncodeResponse(rw, http.StatusOK, imageList)
-}
-
 func (s *Server) getImage(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
 	idOrRef := mux.Vars(req)["name"]
 
@@ -75,6 +64,17 @@ func (s *Server) getImage(ctx context.Context, rw http.ResponseWriter, req *http
 	}
 
 	return EncodeResponse(rw, http.StatusOK, imageInfo)
+}
+
+func (s *Server) listImages(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	filters := req.FormValue("filters")
+
+	imageList, err := s.ImageMgr.ListImages(ctx, filters)
+	if err != nil {
+		logrus.Errorf("failed to list images: %v", err)
+		return err
+	}
+	return EncodeResponse(rw, http.StatusOK, imageList)
 }
 
 func (s *Server) searchImages(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
@@ -98,8 +98,8 @@ func (s *Server) removeImage(ctx context.Context, rw http.ResponseWriter, req *h
 		return err
 	}
 
-	containers, err := s.ContainerMgr.List(ctx, func(meta *mgr.ContainerMeta) bool {
-		return meta.Image == image.ID
+	containers, err := s.ContainerMgr.List(ctx, func(c *mgr.Container) bool {
+		return c.Image == image.ID
 	}, &mgr.ContainerListOption{All: true})
 	if err != nil {
 		return err
@@ -115,5 +115,22 @@ func (s *Server) removeImage(ctx context.Context, rw http.ResponseWriter, req *h
 	}
 
 	rw.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// postImageTag adds tag for the existing image.
+func (s *Server) postImageTag(ctx context.Context, rw http.ResponseWriter, req *http.Request) error {
+	name := mux.Vars(req)["name"]
+
+	targetRef := req.FormValue("repo")
+	if tag := req.FormValue("tag"); tag != "" {
+		targetRef = fmt.Sprintf("%s:%s", targetRef, tag)
+	}
+
+	if err := s.ImageMgr.AddTag(ctx, name, targetRef); err != nil {
+		return err
+	}
+
+	rw.WriteHeader(http.StatusCreated)
 	return nil
 }

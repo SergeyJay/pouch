@@ -191,8 +191,18 @@ func TestMerge(t *testing.T) {
 			ok:       true,
 		}, {
 			src:      &simple{Sa: 1, Sc: true, Sd: map[string]string{"go": "gogo"}, Se: nestS{Na: 11}, Sf: []string{"foo"}},
-			dest:     &simple{Sa: 2, Sb: "world", Sc: false, Sd: map[string]string{"go": "gogo"}, Se: nestS{Na: 22}, Sf: []string{"foo"}},
+			dest:     &simple{Sa: 2, Sb: "world", Sc: false, Sd: map[string]string{"go": "old"}, Se: nestS{Na: 22}, Sf: []string{"foo"}},
 			expected: &simple{Sa: 1, Sb: "world", Sc: true, Sd: map[string]string{"go": "gogo"}, Se: nestS{Na: 11}, Sf: []string{"foo", "foo"}},
+			ok:       true,
+		}, {
+			src:      &simple{Sd: map[string]string{"go": "gogo", "a": "b"}},
+			dest:     &simple{Sd: map[string]string{"go": "old"}},
+			expected: &simple{Sd: map[string]string{"go": "gogo", "a": "b"}},
+			ok:       true,
+		}, {
+			src:      &simple{Sd: map[string]string{"go": "gogo", "a": "b"}},
+			dest:     &simple{},
+			expected: &simple{Sd: map[string]string{"go": "gogo", "a": "b"}},
 			ok:       true,
 		},
 	} {
@@ -384,6 +394,39 @@ func TestCheckPidExist(t *testing.T) {
 			assert.Error(err)
 		} else {
 			assert.NoError(err)
+		}
+	}
+}
+
+func TestParseTimestamp(t *testing.T) {
+	tCases := []struct {
+		val          string
+		defaultSec   int64
+		expectedSec  int64
+		expectedNano int64
+		hasError     bool
+	}{
+		{"20180510", 0, 20180510, 0, false},
+		{"20180510.000000001", 0, 20180510, 1, false},
+		{"20180510.0000000010", 0, 20180510, 1, false},
+		{"20180510.00000001", 0, 20180510, 10, false},
+		{"foo.bar", 0, 0, 0, true},
+		{"20180510.bar", 0, 0, 0, true},
+		{"", -1, -1, 0, false},
+	}
+
+	for _, tc := range tCases {
+		s, n, err := ParseTimestamp(tc.val, tc.defaultSec)
+		if err == nil && tc.hasError {
+			t.Fatal("expected error, but got nothing")
+		}
+
+		if err != nil && !tc.hasError {
+			t.Fatalf("unexpected error %v", err)
+		}
+
+		if s != tc.expectedSec || n != tc.expectedNano {
+			t.Fatalf("expected sec %v, nano %v, but got sec %v, nano %v", tc.expectedSec, tc.expectedNano, s, n)
 		}
 	}
 }

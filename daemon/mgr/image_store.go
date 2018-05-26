@@ -1,6 +1,8 @@
 package mgr
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/alibaba/pouch/pkg/errtypes"
@@ -141,16 +143,23 @@ func (store *imageStore) Search(ref reference.Named) (digest.Digest, reference.N
 
 	// if the reference is short ID or ID
 	//
-	// NOTE: by default, use the sha256 as the digest algorithm
-	id, err := store.searchIDs(digest.Canonical.String(), ref.String())
+	// NOTE: by default, use the sha256 as the digest algorithm if missing
+	// algorithm header.
+	id, err := store.searchIDs(ref.String())
 	if err != nil {
 		return "", nil, err
 	}
 	return id, ref, nil
 }
 
-func (store *imageStore) searchIDs(algo string, prefixID string) (digest.Digest, error) {
+func (store *imageStore) searchIDs(refID string) (digest.Digest, error) {
 	var ids []digest.Digest
+	var id string
+
+	id = refID
+	if !strings.HasPrefix(refID, digest.Canonical.String()) {
+		id = fmt.Sprintf("%s:%s", digest.Canonical.String(), refID)
+	}
 
 	fn := func(_ patricia.Prefix, item patricia.Item) error {
 		if got, ok := item.(digest.Digest); ok {
@@ -158,17 +167,17 @@ func (store *imageStore) searchIDs(algo string, prefixID string) (digest.Digest,
 		}
 
 		if len(ids) > 1 {
-			return pkgerrors.Wrap(errtypes.ErrTooMany, "image: "+prefixID)
+			return pkgerrors.Wrap(errtypes.ErrTooMany, "image: "+refID)
 		}
 		return nil
 	}
 
-	if err := store.idSet.VisitSubtree(patricia.Prefix(algo+":"+prefixID), fn); err != nil {
+	if err := store.idSet.VisitSubtree(patricia.Prefix(id), fn); err != nil {
 		return "", err
 	}
 
 	if len(ids) == 0 {
-		return "", pkgerrors.Wrap(errtypes.ErrNotfound, "image: "+prefixID)
+		return "", pkgerrors.Wrap(errtypes.ErrNotfound, "image: "+refID)
 	}
 	return ids[0], nil
 }
@@ -178,7 +187,7 @@ func (store *imageStore) AddReference(id digest.Digest, primaryRef reference.Nam
 	if reference.IsNamedOnly(ref) ||
 		reference.IsNamedOnly(primaryRef) {
 
-		return pkgerrors.Wrap(errtypes.ErrInvalidType, "invalid reference: missing a tag or digest")
+		return pkgerrors.Wrap(errtypes.ErrInvalidParam, "invalid reference: missing a tag or digest")
 	}
 
 	var (
@@ -186,16 +195,21 @@ func (store *imageStore) AddReference(id digest.Digest, primaryRef reference.Nam
 		trimPrimaryRef = reference.TrimTagForDigest(primaryRef)
 	)
 
+	// NOTE: we don't allow use sha256 as name, because it will confuse with
+	// image ID during search.
+	if getLastComponentInReferenceName(trimRef) == string(digest.Canonical) {
+		return pkgerrors.Wrap(errtypes.ErrInvalidParam, "refusing to create an reference using digest algorithm as name")
+	}
+
 	store.Lock()
 	defer store.Unlock()
 
 	// remove the relationship if the ref has been used by other
 	if oldP, ok := store.primaryRefIndexByRef[trimRef.String()]; ok {
-		// if the trimRef is primary reference
 		if oldP.String() == trimRef.String() {
+			// NOTE: we don't allow to change primary reference
 			if oldP.String() != trimPrimaryRef.String() {
-
-				return pkgerrors.Wrap(errtypes.ErrInvalidType, "invalid reference: cannot replace primary reference")
+				return pkgerrors.Wrap(errtypes.ErrInvalidParam, "invalid reference: cannot replace primary reference")
 			}
 		}
 
@@ -204,6 +218,8 @@ func (store *imageStore) AddReference(id digest.Digest, primaryRef reference.Nam
 	}
 
 	// remove the relationship if the id of primaryRef doesn't equal to original one
+	//
+	// NOTE: The case is that client repulls the same reference, but updated image.
 	if oldID, ok := store.idIndexByPrimaryRef[trimPrimaryRef.String()]; ok {
 		if oldID.String() != id.String() {
 			delete(store.primaryRefsIndexByID[oldID], trimPrimaryRef.String())
@@ -277,4 +293,13 @@ func (store *imageStore) RemoveAllReferences(id digest.Digest) error {
 	delete(store.primaryRefsIndexByID, id)
 	store.idSet.Delete(patricia.Prefix(id.String()))
 	return nil
+}
+
+// getLastComponentInReferenceName will return the last component in the reference.Named().
+// For example, if the reference is docker.io/library/ubuntu:14.06, the function
+// will return ubuntu. If the reference is localhost:5000/sha256:v1, the function
+// will return sha256.
+func getLastComponentInReferenceName(ref reference.Named) string {
+	split := strings.Split(ref.Name(), "/")
+	return split[len(split)-1]
 }

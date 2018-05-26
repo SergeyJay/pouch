@@ -1,7 +1,7 @@
 package containerio
 
 import (
-	"bytes"
+	"io"
 	"net/http"
 	"os"
 
@@ -18,7 +18,7 @@ type Option struct {
 	hijack        http.Hijacker
 	hijackUpgrade bool
 	stdinBackend  string
-	memBuffer     *bytes.Buffer
+	pipe          *io.PipeWriter
 	streams       *remotecommand.Streams
 	criLogFile    *os.File
 }
@@ -72,13 +72,13 @@ func WithDiscard() func(*Option) {
 	}
 }
 
-// WithRawFile specified the raw-file backend.
-func WithRawFile() func(*Option) {
+// WithJSONFile specified the jsonfile backend.
+func WithJSONFile() func(*Option) {
 	return func(opt *Option) {
 		if opt.backends == nil {
 			opt.backends = make(map[string]struct{})
 		}
-		opt.backends["raw-file"] = struct{}{}
+		opt.backends["jsonfile"] = struct{}{}
 	}
 }
 
@@ -101,14 +101,14 @@ func WithStdinHijack() func(*Option) {
 	}
 }
 
-// WithMemBuffer specified the memory buffer backend.
-func WithMemBuffer(memBuffer *bytes.Buffer) func(*Option) {
+// WithPipe specified the pipe backend.
+func WithPipe(pipe *io.PipeWriter) func(*Option) {
 	return func(opt *Option) {
 		if opt.backends == nil {
 			opt.backends = make(map[string]struct{})
 		}
-		opt.backends["memBuffer"] = struct{}{}
-		opt.memBuffer = memBuffer
+		opt.backends["pipe"] = struct{}{}
+		opt.pipe = pipe
 	}
 }
 

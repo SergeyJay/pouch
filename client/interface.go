@@ -28,6 +28,7 @@ type ContainerAPIClient interface {
 	ContainerAttach(ctx context.Context, name string, stdin bool) (net.Conn, *bufio.Reader, error)
 	ContainerCreateExec(ctx context.Context, name string, config *types.ExecCreateConfig) (*types.ExecCreateResp, error)
 	ContainerStartExec(ctx context.Context, execid string, config *types.ExecStartConfig) (net.Conn, *bufio.Reader, error)
+	ContainerExecInspect(ctx context.Context, execid string) (*types.ContainerExecInspect, error)
 	ContainerGet(ctx context.Context, name string) (*types.ContainerJSON, error)
 	ContainerRename(ctx context.Context, id string, name string) error
 	ContainerRestart(ctx context.Context, name string, timeout string) error
@@ -46,6 +47,7 @@ type ImageAPIClient interface {
 	ImageInspect(ctx context.Context, name string) (types.ImageInfo, error)
 	ImagePull(ctx context.Context, name, tag, encodedAuth string) (io.ReadCloser, error)
 	ImageRemove(ctx context.Context, name string, force bool) error
+	ImageTag(ctx context.Context, image string, tag string) error
 }
 
 // VolumeAPIClient defines methods of Volume client.

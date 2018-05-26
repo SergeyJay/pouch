@@ -87,6 +87,7 @@ type VolumeSpec struct {
 	Selector      Selector `json:"selector"`
 	Operable      bool     `json:"operable"`
 	Backend       string   `json:"backend,omitempty"`
+	MountMode     string   `json:"mountMode,omitempty"`
 	*VolumeConfig `json:"config,inline"`
 	Extra         map[string]string `json:"extra"`
 }
@@ -211,7 +212,13 @@ type VolumeID struct {
 
 // NewVolumeID returns VolumeID instance.
 func NewVolumeID(name, driver string) VolumeID {
-	return VolumeID{Name: name, Driver: driver}
+	return VolumeID{
+		Name:      name,
+		Driver:    driver,
+		Options:   map[string]string{},
+		Labels:    map[string]string{},
+		Selectors: map[string]string{},
+	}
 }
 
 // Equal check VolumeID is equal or not.

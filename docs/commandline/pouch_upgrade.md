@@ -24,10 +24,10 @@ test1
 ```
       --annotation strings           Additional annotation for runtime
       --blkio-weight uint16          Block IO (relative weight), between 10 and 1000, or 0 to disable
-      --blkio-weight-device value    Block IO weight (relative device weight) (default [])
+      --blkio-weight-device value    Block IO weight (relative device weight), need CFQ IO Scheduler enable (default [])
       --cap-add strings              Add Linux capabilities
       --cap-drop strings             Drop Linux capabilities
-      --cgroup-parent string         Optional parent cgroup for the container (default "default")
+      --cgroup-parent string         Optional parent cgroup for the container
       --cpu-period int               Limit CPU CFS (Completely Fair Scheduler) period, range is in [1000(1ms),1000000(1s)]
       --cpu-quota int                Limit CPU CFS (Completely Fair Scheduler) quota, range is in [1000,∞)
       --cpu-share int                CPU shares (relative weight)
@@ -61,6 +61,7 @@ test1
       --oom-kill-disable             Disable OOM Killer
       --oom-score-adj int            Tune host's OOM preferences (-1000 to 1000) (default -500)
       --pid string                   PID namespace to use
+      --pids-limit int               Set container pids limit
   -p, --port strings                 Set container ports mapping
       --privileged                   Give extended privileges to the container
       --quota-id string              Specified quota id, if id < 0, it means pouchd alloc a unique quota id
